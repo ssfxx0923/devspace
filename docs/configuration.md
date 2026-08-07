@@ -95,19 +95,22 @@ MCP clients discover metadata from:
 
 | Value | Behavior |
 | --- | --- |
-| `minimal` | Default. Exposes `open_workspace`, `read`, `write`, `edit`, and `bash`. Clients use `bash` with tools such as `rg`, `find`, and `ls` for inspection. |
+| `native` | Default. Exposes `open_workspace`, `read`, `grep`, `glob`, `ls`, `apply_patch`, `exec_command`, and `write_stdin`. |
+| `minimal` | Exposes `open_workspace`, `read`, `write`, `edit`, and `bash`. Clients use `bash` with tools such as `rg`, `find`, and `ls` for inspection. |
 | `full` | Exposes the minimal tools plus dedicated `grep`, `glob`, and `ls` tools. |
-| `codex` | Experimental. Exposes `open_workspace`, `read`, `apply_patch`, `exec_command`, and `write_stdin`. Existing mutation and shell tools are hidden. |
+| `codex` | Deprecated compatibility alias for `native`. |
 
 `DEVSPACE_MINIMAL_TOOLS` remains a backward-compatible alias when
 `DEVSPACE_TOOL_MODE` is unset: `1` selects `minimal` and `0` selects `full`.
-The `codex` mode must be selected through `DEVSPACE_TOOL_MODE` and always uses
-its fixed short tool names regardless of `DEVSPACE_TOOL_NAMING`.
+When `DEVSPACE_TOOL_MODE=codex` is present in an older configuration, DevSpace
+normalizes it to `native`. The name does not enable a Codex integration.
 
-Codex-mode commands run without a PTY by default. Set `tty: true` on
+Native-mode commands run without a PTY by default. Set `tty: true` on
 `exec_command` for interactive terminal programs. PTY support uses the optional
 `node-pty` dependency; `write_stdin` can send input, poll output, and resize PTY
-sessions.
+sessions. Commands may create, modify, move, rename, or delete workspace files.
+They run with the authority of the local operating-system user and are not an
+OS sandbox.
 
 ## Widgets
 
@@ -124,7 +127,6 @@ sessions.
 | Variable | Purpose |
 | --- | --- |
 | `DEVSPACE_SKILLS` | Set to `0` to hide skills. Enabled by default. |
-| `DEVSPACE_SUBAGENTS` | Set to `1` to expose configured agent profiles as Subagents. Experimental and disabled by default. |
 | `DEVSPACE_AGENT_DIR` | Defaults to `~/.codex`; its `skills` child is loaded for compatibility. |
 | `DEVSPACE_SKILL_PATHS` | Optional comma-separated additional skill directories. |
 
@@ -136,26 +138,8 @@ DevSpace discovers standard Agent Skills from:
 
 It also keeps compatibility with:
 
-- the bundled `subagent-delegation` skill when `DEVSPACE_SUBAGENTS=1`, unless `~/.devspace/skills/subagent-delegation/SKILL.md` exists
 - `DEVSPACE_AGENT_DIR/skills`, defaulting to `~/.codex/skills`
 - additional paths from `DEVSPACE_SKILL_PATHS`
-
-When Subagents are enabled, DevSpace discovers agent profiles
-from:
-
-- `~/.devspace/agents/*.md`
-- project `.devspace/agents/*.md`
-
-`open_workspace` returns a compact catalog containing profile names,
-descriptions, providers, and optional models/thinking levels so the host model can choose an
-agent without reading provider-specific launch details. `devspace agents ls`
-lists existing subagent sessions for the current workspace, scoped by the
-workspace environment injected into shell commands. The `subagent-delegation`
-skill teaches the model to use only the minimal `devspace agents ls`,
-`devspace agents run`, and `devspace agents show` workflow.
-
-Starter profile templates are available under `examples/agents/`. Copy or adapt
-them into one of the active profile directories before use.
 
 Legacy project paths such as `.pi/skills` can be added through `DEVSPACE_SKILL_PATHS` when needed.
 
@@ -191,7 +175,7 @@ DEVSPACE_ALLOWED_ROOTS="$HOME/personal,$HOME/work" \
 DEVSPACE_PUBLIC_BASE_URL="https://devspace.example.com" \
 DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
 DEVSPACE_ARTIFACTS="1" \
-DEVSPACE_TOOL_MODE="minimal" \
+DEVSPACE_TOOL_MODE="native" \
 DEVSPACE_WIDGETS="full" \
 npx @waishnav/devspace serve
 ```

@@ -10,7 +10,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { createReviewCheckpointManager } from "./review-checkpoints.js";
 import { ProcessSessionManager } from "./process-sessions.js";
-import { createMcpServer } from "./server.js";
+import { createMcpServer, serverInstructions } from "./server.js";
 import { SqliteWorkspaceStore } from "./workspace-store.js";
 import { WorkspaceRegistry } from "./workspaces.js";
 
@@ -32,8 +32,8 @@ test("open_workspace keeps lifecycle flags out of model output and preserves com
   assert.ok(Array.isArray(firstStructured.agentsFiles));
   assert.ok(Array.isArray(firstStructured.availableAgentsFiles));
   assert.ok(Array.isArray(firstStructured.skills));
-  assert.ok(Array.isArray(firstStructured.agentProviders));
-  assert.ok(Array.isArray(firstStructured.agents));
+  assert.equal("agentProviders" in firstStructured, false);
+  assert.equal("agents" in firstStructured, false);
   assert.ok(Array.isArray(firstStructured.skillDiagnostics));
   assert.equal("workspaceReused" in firstStructured, false);
   assert.equal("includeBootstrapContext" in firstStructured, false);
@@ -42,8 +42,6 @@ test("open_workspace keeps lifecycle flags out of model output and preserves com
   assert.equal(repeatedStructured.agentsFiles, undefined);
   assert.equal(repeatedStructured.availableAgentsFiles, undefined);
   assert.equal(repeatedStructured.skills, undefined);
-  assert.equal(repeatedStructured.agentProviders, undefined);
-  assert.equal(repeatedStructured.agents, undefined);
   assert.equal(repeatedStructured.skillDiagnostics, undefined);
   assert.equal("workspaceReused" in repeatedStructured, false);
   assert.equal("includeBootstrapContext" in repeatedStructured, false);
@@ -61,8 +59,8 @@ test("open_workspace keeps lifecycle flags out of model output and preserves com
   assert.ok(Array.isArray(card.agentsFiles));
   assert.ok(Array.isArray(card.availableAgentsFiles));
   assert.ok(Array.isArray(card.skills));
-  assert.ok(Array.isArray(card.agentProviders));
-  assert.ok(Array.isArray(card.agents));
+  assert.equal("agentProviders" in card, false);
+  assert.equal("agents" in card, false);
 });
 
 test("concurrent checkout opens return one full context and one reuse instruction", async (t) => {
@@ -98,8 +96,8 @@ test("new worktrees always receive a fresh workspace and complete worktree conte
     assert.ok(Array.isArray(structured.agentsFiles));
     assert.ok(Array.isArray(structured.availableAgentsFiles));
     assert.ok(Array.isArray(structured.skills));
-    assert.ok(Array.isArray(structured.agentProviders));
-    assert.ok(Array.isArray(structured.agents));
+    assert.equal("agentProviders" in structured, false);
+    assert.equal("agents" in structured, false);
     assert.ok(Array.isArray(structured.skillDiagnostics));
     assert.match(responseText(result), /Opened isolated worktree workspace/);
   }
@@ -148,7 +146,6 @@ test("checkout reuse and context suppression survive a registry restart", async 
     createReviewCheckpointManager(),
     new ProcessSessionManager(),
     [],
-    [],
   );
   const [restoredClientTransport, restoredServerTransport] = InMemoryTransport.createLinkedPair();
   const restoredClient = new Client({ name: "devspace-restored-test-client", version: "1.0.0" });
@@ -177,6 +174,41 @@ test("checkout reuse and context suppression survive a registry restart", async 
   }
 });
 
+test("native mode exposes the coding runtime tool surface without duplicate legacy tools", async (t) => {
+  const context = await fixture(t, { toolMode: "native" });
+  const tools = await context.client.listTools();
+  const names = tools.tools.map((tool) => tool.name).sort();
+
+  assert.deepEqual(names, [
+    "apply_patch",
+    "exec_command",
+    "glob",
+    "grep",
+    "ls",
+    "open_workspace",
+    "read",
+    "write_stdin",
+  ]);
+  for (const legacyName of ["bash", "write", "edit"]) {
+    assert.equal(names.includes(legacyName), false);
+  }
+
+  const execCommand = tools.tools.find((tool) => tool.name === "exec_command");
+  assert.ok(execCommand?.description);
+  assert.match(execCommand.description, /may create, modify, rename, move, or delete files/i);
+  assert.match(execCommand.description, /rm, mv, cp, mkdir/i);
+  assert.match(execCommand.description, /not an OS sandbox/i);
+  assert.doesNotMatch(execCommand.description, /must not modify project files/i);
+  assert.doesNotMatch(execCommand.description, /do not create or modify files/i);
+
+  const instructions = serverInstructions(context.config);
+  assert.match(instructions, /The MCP host is the coding agent/i);
+  assert.match(instructions, /Shell commands may create, modify, rename, move, or delete project files/i);
+  assert.match(instructions, /not an OS sandbox/i);
+  assert.doesNotMatch(instructions, /all file modifications/i);
+  assert.doesNotMatch(instructions, /Do not create or modify files/i);
+});
+
 interface ServerFixture {
   client: Client;
   project: string;
@@ -185,24 +217,19 @@ interface ServerFixture {
   close: () => Promise<void>;
 }
 
-async function fixture(t: TestContext, options: { git?: boolean } = {}): Promise<ServerFixture> {
+async function fixture(
+  t: TestContext,
+  options: { git?: boolean; toolMode?: "minimal" | "full" | "native" } = {},
+): Promise<ServerFixture> {
   const root = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
   const project = join(root, "project");
   const agentDir = join(root, "agent");
   const stateDir = join(root, ".state");
 
-  await mkdir(join(project, ".devspace", "agents"), { recursive: true });
+  await mkdir(project, { recursive: true });
   await mkdir(agentDir, { recursive: true });
   await writeFile(join(agentDir, "AGENTS.md"), "global instructions\n");
   await writeFile(join(project, "AGENTS.md"), "project instructions\n");
-  await writeFile(join(project, ".devspace", "agents", "reviewer.md"), [
-    "---",
-    "name: reviewer",
-    "description: Reviews project changes.",
-    "provider: codex",
-    "---",
-    "Review changes.",
-  ].join("\n"));
 
   if (options.git) {
     await writeFile(join(project, "README.md"), "hello\n");
@@ -219,7 +246,7 @@ async function fixture(t: TestContext, options: { git?: boolean } = {}): Promise
     DEVSPACE_WORKTREE_ROOT: join(root, ".worktrees"),
     DEVSPACE_AGENT_DIR: agentDir,
     DEVSPACE_WIDGETS: "full",
-    DEVSPACE_TOOL_MODE: "full",
+    DEVSPACE_TOOL_MODE: options.toolMode ?? "full",
     DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
     PORT: "1",
   });
@@ -230,7 +257,6 @@ async function fixture(t: TestContext, options: { git?: boolean } = {}): Promise
     workspaces,
     createReviewCheckpointManager(),
     new ProcessSessionManager(),
-    [],
     [],
   );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

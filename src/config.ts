@@ -3,9 +3,9 @@ import { join, resolve } from "node:path";
 import { expandHomePath } from "./roots.js";
 import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
-import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
+import { devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
 
-export type ToolMode = "minimal" | "full" | "codex";
+export type ToolMode = "minimal" | "full" | "native";
 export type WidgetMode = "off" | "changes" | "full";
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -27,8 +27,6 @@ export interface ServerConfig {
   skillsEnabled: boolean;
   skillPaths: string[];
   devspaceSkillsDir: string;
-  devspaceAgentsDir: string;
-  subagents: boolean;
   agentDir: string;
   logging: LoggingConfig;
 }
@@ -86,13 +84,14 @@ function parseBoolean(value: string | undefined): boolean {
 
 function parseToolMode(env: NodeJS.ProcessEnv): ToolMode {
   const mode = env.DEVSPACE_TOOL_MODE;
-  if (mode === "minimal" || mode === "full" || mode === "codex") return mode;
+  if (mode === "native" || mode === "codex") return "native";
+  if (mode === "minimal" || mode === "full") return mode;
   if (mode) throw new Error(`Invalid DEVSPACE_TOOL_MODE: ${mode}`);
 
   if (env.DEVSPACE_MINIMAL_TOOLS !== undefined) {
     return parseBoolean(env.DEVSPACE_MINIMAL_TOOLS) ? "minimal" : "full";
   }
-  return "minimal";
+  return "native";
 }
 
 function parseLogLevel(value: string | undefined): LogLevel {
@@ -246,11 +245,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     skillsEnabled: env.DEVSPACE_SKILLS === undefined ? true : parseBoolean(env.DEVSPACE_SKILLS),
     skillPaths: parsePathList(env.DEVSPACE_SKILL_PATHS),
     devspaceSkillsDir: devspaceSkillsDir(env),
-    devspaceAgentsDir: devspaceAgentsDir(env),
-    subagents:
-      env.DEVSPACE_SUBAGENTS === undefined
-        ? files.config.subagents === true
-        : parseBoolean(env.DEVSPACE_SUBAGENTS),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
     logging: parseLoggingConfig(env),
   };

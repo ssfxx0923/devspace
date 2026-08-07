@@ -1,8 +1,8 @@
 # DevSpace
 
-DevSpace is a local development execution layer for MCP hosts such as ChatGPT and Claude. It gives a remote host workspace-scoped tools for reading, editing, searching, running commands, managing Git worktrees, reviewing changes, and coordinating bounded subagents on the user's machine.
+DevSpace is a local development execution layer for MCP hosts such as ChatGPT and Claude. It gives a remote host workspace-scoped tools for reading, editing, searching, running commands, managing Git worktrees, and reviewing changes on the user's machine.
 
-Pi's SDK currently provides mature local coding primitives. DevSpace wraps those primitives in a Streamable HTTP MCP server and adds the product-specific boundaries around them: approved roots, workspace state, instructions, process sessions, worktrees, artifacts, review checkpoints, widgets, and subagent execution.
+Pi's SDK currently provides mature local coding primitives. DevSpace wraps those primitives in a Streamable HTTP MCP server and adds the product-specific boundaries around them: approved roots, workspace state, instructions, process sessions, worktrees, artifacts, review checkpoints, and widgets. The MCP host is the coding agent; DevSpace must not invoke models or coding-agent providers.
 
 DevSpace owns tooling mechanics. The model receives only meaningful and actionable choices. The user sees outcomes. Tool defination should not leak internal implementation or it shoudn't be giving unwanted options to model to choose from if tooling can handle this.
 
@@ -13,9 +13,9 @@ These ideas should stay true as the project evolves:
 1. **The host is the orchestrator.** DevSpace exposes clear capabilities and execution state. It should not hide the workflow inside an opaque, uninspectable agent loop.
 2. **Everything happens in a workspace.** A workspace represents one local project directory or worktree plus the instructions and state accumulated while operating in it.
 3. **Local authority stays explicit.** DevSpace runs with access to the user's machine. Roots, paths, commands, processes, credentials, and destructive operations must be treated as product boundaries.
-4. **Subagents are bounded workers.** A subagent should have an explicit task, profile, working context, lifecycle, and result that the host can inspect and coordinate.
-5. **Adapters stay at the edges.** Pi, MCP hosts, and model providers each have their own terminology and capabilities. Provider-specific behavior should not become the core domain model.
-6. **Prefer composable primitives.** Build a small set of reliable operations that can be combined into larger workflows instead of baking every workflow into the server.
+4. **The host is the agent.** DevSpace exposes runtime tools and never delegates coding or reasoning to another model or coding-agent provider.
+5. **Adapters stay at the edges.** Pi and MCP hosts have their own terminology and capabilities. Adapter-specific behavior should not become the core domain model.
+6. **Prefer composable primitives.** Build a small set of reliable operations that can be combined into larger workflows instead of baking workflows into the server.
 
 ## Glossary
 
@@ -26,11 +26,9 @@ These ideas should stay true as the project evolves:
 - **Allowed root** — a configured filesystem boundary within which a workspace may be opened. It is not itself necessarily a workspace.
 - **Checkout mode** — operating on an existing checkout supplied by the user.
 - **Worktree mode** — operating in an isolated Git worktree.
-- **Tool surface** — the tools exposed by a configured mode, such as minimal, full, or Codex-compatible.
+- **Tool surface** — the tools exposed by a configured mode, such as native, minimal, or full.
 - **Process session** — a long-running command tracked for later input, output, or termination.
 - **Instruction file** — an `AGENTS.md` or `CLAUDE.md` discovered while navigating a workspace.
-- **Subagent** — a bounded model invocation delegated and coordinated by the host.
-- **Agent profile** — the model, provider, tools, and instructions used for a subagent.
 - **Artifact** — an output surfaced for the host or user to inspect.
 - **Review checkpoint** — stored state representing a coherent set of changes.
 - **Widget** — host-rendered UI/Cards attached to an MCP response.
@@ -47,9 +45,9 @@ Keep tunnel ownership and credentials with the user. DevSpace may operate throug
 
 ## Diagnose the correct layer
 
-A failure may belong to the host, MCP transport, DevSpace, a Pi adapter, a provider, a model, a tool implementation, or the target project. Preserve the original error and identify the failing boundary before changing code.
+A failure may belong to the host, MCP transport, DevSpace, a Pi primitive, a tool implementation, or the target project. Preserve the original error and identify the failing boundary before changing code.
 
-An adapter exception is not evidence that a model failed. A successful command is not evidence that a GUI opened, a host refreshed, or a user-visible workflow succeeded.
+A successful command is not evidence that a GUI opened, a host refreshed, or a user-visible workflow succeeded.
 
 Do not expand DevSpace's responsibility while fixing a local symptom. Host UI, provider model naming, tunnel management, and duplicated review experiences require an explicit product decision.
 
@@ -62,7 +60,7 @@ Determine how the user will consume the change and verify that path. Behavior ma
 - a fresh process and a server or host that needs restarting;
 - checkout mode and worktree mode;
 - Linux, macOS, and Windows Bash environments;
-- minimal, full, and Codex-compatible tool surfaces;
+- native, minimal, and full tool surfaces;
 - widgets enabled, disabled, or limited to change review.
 
 State clearly when only a narrower proxy was verified. For model-facing schemas, inspect what the host receives. For UI and artifacts, inspect the rendered result rather than inferring success from the producing command.
@@ -75,7 +73,7 @@ When changing a cross-cutting concept, check every surface it actually reaches:
 - workspace lifecycle and instruction loading;
 - allowed-root and path-containment behavior;
 - checkout and worktree modes;
-- process and subagent lifecycle;
+- process lifecycle;
 - tool-surface filtering;
 - widgets, artifacts, and review checkpoints;
 - persistence and migrations;
@@ -94,25 +92,24 @@ For UI changes, include before/after images and a short interaction video when b
 ## Where code lives
 
 - `src/server.ts` — MCP server setup, tool registration, and response wiring.
-- `src/workspaces.ts` — workspace lifecycle, instructions, skills, and profiles.
+- `src/workspaces.ts` — workspace lifecycle, instructions, and skills.
 - `src/roots.ts` — allowed roots and path containment.
 - `src/process-sessions.ts` — long-running process lifecycle.
 - `src/git.ts` and `src/git-worktrees.ts` — Git and worktree operations.
-- `src/local-agent-*.ts` — subagent configuration, providers, and execution.
 - `src/artifact-*.ts` and `src/incoming-artifacts.ts` — artifact handling.
 - `src/review-checkpoints.ts` — persisted change-review checkpoints.
 - `src/ui/` — MCP widgets.
 - `src/db/` — persisted local state and migrations.
 - `test/` — behavior and regression tests.
 
-Start at the boundary named by the problem and follow the data. Keep policy in DevSpace, provider translation in adapters, and important behavior in schemas, types, checks, or explicit tool results rather than hidden prompt conventions.
+Start at the boundary named by the problem and follow the data. Keep policy in DevSpace and important behavior in schemas, types, checks, or explicit tool results rather than hidden prompt conventions.
 
 ## Project taste
 
 - Prefer explicit lifecycle and state over hidden autonomy.
 - Make tasks, inputs, outputs, failures, and ownership inspectable.
-- Keep subagent execution composable and independently testable.
-- Preserve host and provider data unless DevSpace has a concrete reason to normalize it.
+- Keep runtime operations composable and independently testable.
+- Preserve host data unless DevSpace has a concrete reason to normalize it.
 - Add compatibility behavior only for an identified consumer with a real upgrade path.
 - Reuse glossary terms in schemas, types, documentation, and errors.
 - Keep the execution layer small, reliable, and unsurprising.

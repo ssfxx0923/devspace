@@ -55,12 +55,6 @@ import { shutdownHttpServer } from "./server-shutdown.js";
 import { formatPathForPrompt } from "./skills.js";
 import { createWorkspaceStore } from "./workspace-store.js";
 import { formatAgentsPath, WorkspaceRegistry } from "./workspaces.js";
-import { summarizeLocalAgentProfile } from "./local-agent-profiles.js";
-import {
-  formatLocalAgentProviderAvailabilitySummary,
-  getLocalAgentProviderAvailabilitySnapshot,
-  type LocalAgentProviderAvailability,
-} from "./local-agent-availability.js";
 
 type Transport = StreamableHTTPServerTransport;
 // MCP clients can reconnect without closing the previous transport. Bound stale
@@ -91,7 +85,6 @@ const SHELL_TOOL_ANNOTATIONS = {
 interface RunningServer {
   app: ReturnType<typeof createMcpExpressApp>;
   config: ServerConfig;
-  localAgentProviders: LocalAgentProviderAvailability[];
   close(): Promise<void>;
 }
 
@@ -187,17 +180,17 @@ interface ToolLogFields {
   error?: string;
 }
 
-function serverInstructions(config: ServerConfig): string {
+export function serverInstructions(config: ServerConfig): string {
   const artifactInstruction = config.artifactsEnabled && isArtifactDownloadSupportedPlatform()
-    ? " When the user supplies or generates a file that is not present on the DevSpace host, use download_artifact with its native file value, the existing workspace ID, and a suitable relative destination path chosen from the user's request and project structure. The tool refuses to overwrite an existing destination and returns the normalized workspace-relative path. Use normal workspace tools when explicit inspection, replacement, movement, renaming, or deletion is needed. Do not recreate binary files with write/edit calls or place signed URLs, native file objects, base64 content, or invented host paths in shell commands or logs."
+    ? " When the user supplies or generates a file that is not present on the DevSpace host, use download_artifact with its native file value, the existing workspace ID, and a suitable relative destination path chosen from the user's request and project structure. The tool refuses to overwrite an existing destination and returns the normalized workspace-relative path. Use normal workspace tools when explicit inspection, replacement, movement, renaming, or deletion is needed. Do not recreate binary files with text-oriented workspace tools or place signed URLs, native file objects, base64 content, or invented host paths in shell commands or logs."
     : "";
   const showChangesInstruction =
     config.widgets === "changes"
       ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
       : "";
 
-  if (config.toolMode === "codex") {
-    return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Open it again when the workspaceId is invalid, the project changes, checkout/worktree mode changes, or another isolated worktree is needed. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}`;
+  if (config.toolMode === "native") {
+    return `Use DevSpace as a local coding runtime. The MCP host is the coding agent; DevSpace does not delegate reasoning or coding work to another model or coding-agent provider. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for efficient workspace inspection. Use apply_patch when a structured patch is the clearest way to edit source code. Use exec_command naturally for normal local development operations, including git, rm, mv, cp, mkdir, package managers, generators, formatters, tests, builds, compilers, interpreters, Docker, and project scripts. Shell commands may create, modify, rename, move, or delete project files. Use write_stdin to poll or interact with running processes. Follow project instruction files and applicable skills. Before completing a coding task, run relevant tests and inspect the resulting changes when appropriate. Shell commands run with the authority of the local operating-system user and are not an OS sandbox.${artifactInstruction}${showChangesInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -210,27 +203,7 @@ function serverInstructions(config: ServerConfig): string {
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
 
-  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching to a different project folder, changing checkout/worktree mode, the workspaceId is rejected as unknown, or a new isolated worktree is requested. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}`;
-}
-
-function formatVisibleAgent(agent: {
-  name: string;
-  provider: string;
-  model?: string;
-  thinking?: string;
-  providerAvailable?: boolean;
-  providerUnavailableReason?: string;
-}): string {
-  const model = agent.model ? `, model ${agent.model}` : "";
-  const thinking = agent.thinking ? `, thinking ${agent.thinking}` : "";
-  const availability = agent.providerAvailable === false
-    ? `, unavailable: ${agent.providerUnavailableReason ?? "provider unavailable"}`
-    : "";
-  return `${agent.name} (${agent.provider}${model}${thinking}${availability})`;
-}
-
-function formatUnavailableAgentProvider(provider: LocalAgentProviderAvailability): string {
-  return `${provider.name} (${provider.reason ?? "unavailable"})`;
+  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching to a different project folder, changing checkout/worktree mode, the workspaceId is rejected as unknown, or a new isolated worktree is requested. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell.${artifactInstruction}${showChangesInstruction}`;
 }
 
 function resultOutputSchema(extra: z.ZodRawShape = {}): z.ZodRawShape {
@@ -253,22 +226,6 @@ const workspaceSkillOutputSchema = z.object({
 const workspaceAgentsFileOutputSchema = z.object({
   path: z.string(),
   content: z.string(),
-});
-
-const workspaceLocalAgentOutputSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  provider: z.string(),
-  model: z.string().optional(),
-  thinking: z.string().optional(),
-  providerAvailable: z.boolean().optional(),
-  providerUnavailableReason: z.string().optional(),
-});
-
-const workspaceLocalAgentProviderOutputSchema = z.object({
-  name: z.string(),
-  available: z.boolean(),
-  reason: z.string().optional(),
 });
 
 const workspaceAvailableAgentsFileOutputSchema = z.object({
@@ -550,7 +507,7 @@ function processToolResponse(
   };
 }
 
-function registerCodexProcessTools(
+function registerNativeProcessTools(
   server: McpServer,
   config: ServerConfig,
   workspaces: WorkspaceRegistry,
@@ -562,7 +519,7 @@ function registerCodexProcessTools(
     {
       title: "Execute command",
       description:
-        "Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, and long-running processes. Call open_workspace first and pass workspaceId.",
+        "Run a normal local development shell command from an open workspace. Commands may create, modify, rename, move, or delete files and may use rm, mv, cp, mkdir, git, package managers, generators, formatters, tests, builds, compilers, interpreters, Docker, and project scripts. Returns output when the command exits during the yield window; otherwise returns a sessionId for write_stdin. Shell execution has the authority of the local operating-system user and is not an OS sandbox. Workspace containment applies to structured filesystem tools, not arbitrary shell commands. Call open_workspace first and pass workspaceId.",
       inputSchema: {
         workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
         cmd: z.string().min(1).describe("Shell command to execute."),
@@ -699,7 +656,6 @@ export function createMcpServer(
   workspaces: WorkspaceRegistry,
   reviewCheckpoints: ReturnType<typeof createReviewCheckpointManager>,
   processSessions: ProcessSessionManager,
-  localAgentProviders: LocalAgentProviderAvailability[],
   incomingArtifactAdapters: readonly IncomingArtifactAdapter[],
 ): McpServer {
   const server = new McpServer(
@@ -788,8 +744,6 @@ export function createMcpServer(
         agentsFiles: z.array(workspaceAgentsFileOutputSchema).optional(),
         availableAgentsFiles: z.array(workspaceAvailableAgentsFileOutputSchema).optional(),
         skills: z.array(workspaceSkillOutputSchema).optional(),
-        agentProviders: z.array(workspaceLocalAgentProviderOutputSchema).optional(),
-        agents: z.array(workspaceLocalAgentOutputSchema).optional(),
         skillDiagnostics: z.array(z.unknown()).optional(),
         instruction: z.string(),
       },
@@ -821,16 +775,6 @@ export function createMcpServer(
           description: skill.description,
           path: formatPathForPrompt(skill.filePath),
         }));
-      const cardAgentProviders = config.subagents ? localAgentProviders : [];
-      const cardAgents = workspace.agentProfiles.map((profile) => {
-        const summary = summarizeLocalAgentProfile(profile);
-        const availability = cardAgentProviders.find((provider) => provider.name === summary.provider);
-        return {
-          ...summary,
-          providerAvailable: availability?.available,
-          providerUnavailableReason: availability?.reason,
-        };
-      });
       const cardAgentsFiles = agentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
         content: file.content,
@@ -839,8 +783,6 @@ export function createMcpServer(
         path: formatAgentsPath(file.path, workspace.root),
       }));
       const visibleSkills = includeBootstrapContext ? cardSkills : [];
-      const visibleAgentProviders = includeBootstrapContext ? cardAgentProviders : [];
-      const visibleAgents = includeBootstrapContext ? cardAgents : [];
       const loadedAgentsFiles = includeBootstrapContext ? cardAgentsFiles : [];
       const availableAgentsFileOutputs = includeBootstrapContext ? cardAvailableAgentsFiles : [];
       const cardInstruction = config.skillsEnabled
@@ -850,10 +792,10 @@ export function createMcpServer(
         ? [
             `Workspace already open as ${workspace.id}.`,
             "Reuse this workspaceId for subsequent tool calls. This is the same checkout previously opened for this project in this conversation.",
-            "Continue following the project instructions, nested instruction files, skills, agent profiles, and diagnostics previously provided for this workspace. They remain the active workspace context and are not repeated here.",
+            "Continue following the project instructions, nested instruction files, skills, and diagnostics previously provided for this workspace. They remain the active workspace context and are not repeated here.",
           ].join("\n\n")
         : workspace.mode === "worktree"
-          ? "Use this workspaceId for subsequent tool calls. Follow the project instructions, nested instruction files, skills, agent profiles, and diagnostics returned for this isolated worktree."
+          ? "Use this workspaceId for subsequent tool calls. Follow the project instructions, nested instruction files, skills, and diagnostics returned for this isolated worktree."
           : cardInstruction;
       const resultContent: ToolContent[] = [
         {
@@ -874,15 +816,6 @@ export function createMcpServer(
               : undefined,
             visibleSkills.length > 0
               ? `Available skills: ${visibleSkills.map((skill) => skill.name).join(", ")}`
-              : undefined,
-            visibleAgentProviders.some((provider) => provider.available)
-              ? `Available subagent providers: ${visibleAgentProviders.filter((provider) => provider.available).map((provider) => provider.name).join(", ")}`
-              : undefined,
-            visibleAgentProviders.some((provider) => !provider.available)
-              ? `Unavailable subagent providers: ${visibleAgentProviders.filter((provider) => !provider.available).map(formatUnavailableAgentProvider).join(", ")}`
-              : undefined,
-            visibleAgents.length > 0
-              ? `Available subagent profiles: ${visibleAgents.map(formatVisibleAgent).join(", ")}`
               : undefined,
             instruction,
           ].filter(Boolean).join("\n"),
@@ -912,16 +845,12 @@ export function createMcpServer(
             agentsFiles: cardAgentsFiles,
             availableAgentsFiles: cardAvailableAgentsFiles,
             skills: cardSkills,
-            agentProviders: cardAgentProviders,
-            agents: cardAgents,
             instruction: cardInstruction,
             summary: {
               mode: workspace.mode,
               agentsFiles: cardAgentsFiles.length,
               availableAgentsFiles: cardAvailableAgentsFiles.length,
               skills: cardSkills.length,
-              agentProviders: cardAgentProviders.length,
-              agents: cardAgents.length,
             },
           },
         },
@@ -936,8 +865,6 @@ export function createMcpServer(
                 agentsFiles: loadedAgentsFiles,
                 availableAgentsFiles: availableAgentsFileOutputs,
                 skills: visibleSkills,
-                agentProviders: visibleAgentProviders,
-                agents: visibleAgents,
                 skillDiagnostics: workspace.skillDiagnostics,
               }
             : {}),
@@ -1044,7 +971,7 @@ export function createMcpServer(
     },
   );
 
-  if (config.toolMode !== "codex") {
+  if (config.toolMode !== "native") {
   registerAppTool(
     server,
     toolNames.write,
@@ -1210,14 +1137,14 @@ export function createMcpServer(
   );
   }
 
-  if (config.toolMode === "codex") {
+  if (config.toolMode === "native") {
     registerAppTool(
       server,
       "apply_patch",
       {
         title: "Apply patch",
         description:
-          "Apply one Codex-style patch inside an open workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this for all file modifications. Paths must be relative to the workspace. Call open_workspace first and pass workspaceId.",
+          "Apply one structured patch inside an open workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this when a patch is the clearest way to make precise source edits; shell commands may also modify files when more appropriate. Paths must be relative to the workspace. Call open_workspace first and pass workspaceId.",
         inputSchema: {
           workspaceId: z
             .string()
@@ -1340,7 +1267,7 @@ export function createMcpServer(
     );
   }
 
-  if (config.toolMode === "full") {
+  if (config.toolMode === "full" || config.toolMode === "native") {
     registerAppTool(
       server,
       toolNames.grep,
@@ -1551,7 +1478,7 @@ export function createMcpServer(
     );
   }
 
-  if (config.toolMode !== "codex") {
+  if (config.toolMode !== "native") {
   registerAppTool(
     server,
     toolNames.shell,
@@ -1643,8 +1570,8 @@ export function createMcpServer(
   );
   }
 
-  if (config.toolMode === "codex") {
-    registerCodexProcessTools(server, config, workspaces, processSessions);
+  if (config.toolMode === "native") {
+    registerNativeProcessTools(server, config, workspaces, processSessions);
   }
 
   if (config.artifactsEnabled && isArtifactDownloadSupportedPlatform()) {
@@ -1688,9 +1615,6 @@ export function createServer(
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
   const processSessions = new ProcessSessionManager();
-  const localAgentProviders = config.subagents
-    ? getLocalAgentProviderAvailabilitySnapshot()
-    : [];
 
   const logSessionCloseResults = (
     reason: "idle_timeout" | "server_shutdown",
@@ -1850,7 +1774,6 @@ export function createServer(
           workspaces,
           reviewCheckpoints,
           processSessions,
-          localAgentProviders,
           incomingArtifactAdapters,
         );
         await server.connect(transport);
@@ -1875,7 +1798,6 @@ export function createServer(
   return {
     app,
     config,
-    localAgentProviders,
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
@@ -1899,7 +1821,7 @@ async function isMainModule(): Promise<boolean> {
 }
 
 if (await isMainModule()) {
-  const { app, config, close, localAgentProviders } = createServer();
+  const { app, config, close } = createServer();
   const httpServer = app.listen(config.port, config.host, () => {
     console.log(
       `devspace listening on http://${config.host}:${config.port}/mcp`,
@@ -1916,9 +1838,6 @@ if (await isMainModule()) {
         ? "enabled"
         : `unsupported on ${process.platform}`;
     console.log(`native artifact download: ${artifactDownloadStatus}`);
-    if (config.subagents) {
-      console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
-    }
   });
 
   let shuttingDown = false;
