@@ -1,6 +1,6 @@
 # ChatGPT Coding Workflow
 
-DevSpace brings a Codex-style coding-agent loop to ChatGPT and other MCP hosts:
+DevSpace gives ChatGPT and other MCP hosts a direct local coding runtime:
 inspect the repo, follow local instructions, make scoped edits, run
 verification, and show the user what changed.
 
@@ -116,19 +116,8 @@ DevSpace discovers standard Agent Skills from:
 
 It also keeps compatibility with:
 
-- the bundled `subagent-delegation` skill when `DEVSPACE_SUBAGENTS=1`, unless `~/.devspace/skills/subagent-delegation/SKILL.md` exists
 - `DEVSPACE_AGENT_DIR/skills`, defaulting to `~/.codex/skills`
 - additional paths from `DEVSPACE_SKILL_PATHS`
-
-When Subagents are enabled, DevSpace discovers agent profiles
-from `~/.devspace/agents/*.md` and project `.devspace/agents/*.md`.
-`open_workspace` exposes a compact catalog with profile names, descriptions,
-providers, and optional models/thinking levels so the model can choose a configured agent
-without seeing provider-specific launch details.
-
-Example profiles are packaged under `examples/agents/` for users who want
-starter templates. Copy or adapt them into one of the active profile directories
-before use.
 
 Legacy project paths such as `.pi/skills` can be added through `DEVSPACE_SKILL_PATHS` when needed.
 
@@ -140,42 +129,35 @@ Skill paths may be outside the workspace. DevSpace only permits reading:
 - advertised `SKILL.md` files
 - files under a skill directory after that skill's `SKILL.md` has been read
 
-Set `DEVSPACE_SKILLS=0` to hide skills from workspace output. Set
-`DEVSPACE_SUBAGENTS=1` to expose the experimental subagent catalog and
-`subagent-delegation` skill. That skill teaches the minimal
-`devspace agents ls`, `devspace agents run`, and `devspace agents show`
-workflow. The catalog comes from `open_workspace`; `devspace agents ls` lists
-existing subagent sessions for that workspace.
+Set `DEVSPACE_SKILLS=0` to hide skills from workspace output.
 
 ## Tool Names
 
-DevSpace exposes these tool names:
+Native mode is the default and exposes:
 
 - `open_workspace`
 - `read`
-- `write`
-- `edit`
-- `bash`
-
-By default, DevSpace also runs in `DEVSPACE_TOOL_MODE=minimal`, so dedicated
-`grep`, `glob`, and `ls` tools are hidden. Use `bash` with command-line tools
-such as `rg`, `find`, and `ls` for search and directory inspection.
-
-Use `DEVSPACE_TOOL_MODE=full` to restore dedicated search and directory tools.
-
-The experimental Codex-style surface is enabled with
-`DEVSPACE_TOOL_MODE=codex`. It exposes:
-
-- `open_workspace`
-- `read`
+- `grep`
+- `glob`
+- `ls`
 - `apply_patch`
 - `exec_command`
 - `write_stdin`
 
-In this mode, `write`, `edit`, `bash`, `grep`, `glob`, and `ls` are not
-registered. `exec_command` returns a process session ID when a command is still
-running after its yield window. Use `write_stdin` to poll it, send input, resize
-a PTY, or send Ctrl-C. Set `tty: true` only for commands that need a terminal.
+Use `apply_patch` when a structured patch is the clearest way to edit source.
+Use `exec_command` naturally for shell operations, including file mutations,
+Git, package managers, generators, formatters, tests, builds, Docker, and
+project scripts. A command that remains active returns a process session ID;
+use `write_stdin` to poll it, send input, resize a PTY, or send Ctrl-C.
+
+`minimal` and `full` remain available for older clients. `minimal` exposes the
+legacy `write`, `edit`, and `bash` tools, while `full` also exposes dedicated
+search tools. `DEVSPACE_TOOL_MODE=codex` is accepted only as a deprecated alias
+for `native`; it does not invoke Codex or any other coding agent.
+
+Shell commands run with the authority of the local user running DevSpace and
+are not an OS sandbox. Workspace containment applies to structured filesystem
+tools, not arbitrary shell commands.
 
 ## Show Changes
 
@@ -194,13 +176,13 @@ not change this workflow.
 
 ## Shell Use
 
-The shell tool is for commands that belong in a terminal:
+The native shell supports normal local development operations, including:
 
-- tests
-- builds
-- git inspection
-- package scripts
-- environment checks
+- file creation, modification, movement, renaming, and deletion
+- Git and worktree operations
+- package managers, generators, and project scripts
+- formatters, linters, tests, and builds
+- compilers, interpreters, Docker, and long-running processes
 
-File writes should go through the edit/write tools rather than shell
-redirection, heredocs, `tee`, `sed -i`, or generated scripts.
+Use `apply_patch` when it is convenient for precise source edits. Shell
+redirection, scripts, and other normal command-line file operations are allowed.

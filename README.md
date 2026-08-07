@@ -6,7 +6,7 @@
 
 <h1 align="center">DevSpace</h1>
 
-<p align="center">Bring a Codex-style coding workflow to ChatGPT.</p>
+<p align="center">A local coding MCP runtime for ChatGPT.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@waishnav/devspace"><img alt="npm" src="https://img.shields.io/npm/v/%40waishnav%2Fdevspace?style=flat-square" /></a>
@@ -16,9 +16,9 @@
 
 [![DevSpace connected to ChatGPT](https://raw.githubusercontent.com/Waishnav/devspace/main/docs/assets/devspace-screenshot.png)](https://raw.githubusercontent.com/Waishnav/devspace/main/docs/assets/devspace-screenshot.png)
 
-**Give ChatGPT a secure connection to your own machine and Turn ChatGPT into Codex**
+**ChatGPT is the coding agent. DevSpace is the local runtime and tool layer.**
 
-DevSpace is a self-hosted MCP server that lets ChatGPT read, edit, search, and run code in your real local projects — your files, your tools, your terminal — without uploading anything to a third party. You run it on your machine, expose it through a tunnel you control, and approve the connection with a password only you have.
+DevSpace is a self-hosted MCP server that lets ChatGPT and other MCP hosts directly work with local projects through workspace-scoped filesystem tools, native shell execution, persistent process sessions, Git worktrees, artifacts, and change review. DevSpace does not invoke another coding model or coding-agent provider behind the scenes.
 
 ## Sponsors and Special Thanks
 
@@ -133,9 +133,10 @@ and show you what changed.
 
 DevSpace gives ChatGPT tools to:
 
-- read, write, and edit files inside the opened workspace
-- search code and inspect directories
-- run shell commands for tests, builds, git, and package scripts
+- read and search files inside the opened workspace
+- apply structured patches for precise source changes
+- run normal local development commands, including file operations, Git, package managers, generators, tests, builds, and project scripts
+- keep long-running and interactive processes available through persistent process sessions
 - use isolated Git worktrees for parallel coding sessions
 - follow project instructions from `AGENTS.md` and `CLAUDE.md`
 - discover local agent skills from your skill folders
@@ -143,11 +144,9 @@ DevSpace gives ChatGPT tools to:
 
 ## Mental Model
 
-DevSpace is remote access to selected local folders.
+The MCP host is the coding agent. DevSpace is remote access to selected local folders and the local development runtime.
 
-You decide which roots are allowed. The MCP client still has powerful local
-capabilities inside an opened workspace, including shell execution. Treat a
-connected client like a trusted coding partner with access to your machine.
+You decide which roots are allowed for structured filesystem tools. Shell commands run with the authority of the local user running DevSpace and are not an OS sandbox. Treat a connected client like a trusted coding partner with access to your machine.
 
 For a normal ChatGPT coding session:
 
@@ -189,15 +188,7 @@ devspace doctor
 Every piece of software is becoming conversational. Natural language is
 redefining how we interact with tools, workflows, and systems.
 
-My bet is that ChatGPT becomes the operating system for everything. Once we
-reach AGI, we will simply talk to ChatGPT, and it will prompt, coordinate, and
-orchestrate sub-agents that set up the right loops for us.
-
-We are not there yet.
-
-DevSpace is one attempt to fast-forward that future: a way for MCP-capable
-hosts like ChatGPT and Claude to work directly with local project files through
-explicit, inspectable tools.
+DevSpace keeps that relationship direct: MCP-capable hosts such as ChatGPT and Claude perform the reasoning and coding work themselves, while DevSpace provides explicit, inspectable access to the local development environment.
 
 ## Built by Waishnav
 

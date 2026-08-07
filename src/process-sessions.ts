@@ -100,7 +100,6 @@ function processEnvironment(input?: {
     PAGER: "cat",
     GIT_PAGER: "cat",
     GH_PAGER: "cat",
-    CODEX_CI: "1",
     LANG: process.env.LANG ?? "C.UTF-8",
     LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
     ...(input?.workspaceId ? { DEVSPACE_WORKSPACE_ID: input.workspaceId } : {}),

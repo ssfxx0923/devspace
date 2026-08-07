@@ -26,21 +26,6 @@ test("a checkout exposes initial and nested instruction context while filtering 
     opened.availableAgentsFiles.map((file) => file.path),
     [join(context.root, "nested", "AGENTS.md")],
   );
-  assert.deepEqual(
-    opened.workspace.agentProfiles.map((profile) => ({
-      name: profile.name,
-      description: profile.description,
-      provider: profile.provider,
-      body: profile.body,
-    })),
-    [{
-      name: "reviewer",
-      description: "Read-only project reviewer.",
-      provider: "codex",
-      body: "Review only.",
-    }],
-  );
-
   if (platform() !== "win32") {
     const unsafeAgentDir = join(context.root, ".pi", "unsafe-agent");
     await mkdir(unsafeAgentDir, { recursive: true });
@@ -189,20 +174,6 @@ async function fixture(t: TestContext): Promise<WorkspaceFixture> {
   }
 
   await writeFile(join(root, "AGENTS.md"), "root instructions\n");
-  await mkdir(join(root, ".devspace", "agents"), { recursive: true });
-  await writeFile(
-    join(root, ".devspace", "agents", "reviewer.md"),
-    [
-      "---",
-      "name: reviewer",
-      "description: Read-only project reviewer.",
-      "provider: codex",
-      "---",
-      "",
-      "Review only.",
-      "",
-    ].join("\n"),
-  );
   await mkdir(join(root, "nested"));
   await writeFile(join(root, "nested", "AGENTS.md"), "nested instructions\n");
   await writeFile(join(root, "nested", "file.txt"), "hello\n");
@@ -212,7 +183,6 @@ async function fixture(t: TestContext): Promise<WorkspaceFixture> {
     DEVSPACE_ALLOWED_ROOTS: root,
     DEVSPACE_WORKTREE_ROOT: join(root, ".devspace", "worktrees"),
     DEVSPACE_AGENT_DIR: agentDir,
-    DEVSPACE_SUBAGENTS: "1",
     DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
     PORT: "1",
   });
