@@ -49,13 +49,15 @@ test("a checkout exposes initial and nested instruction context while filtering 
   }
 });
 
-test("opening a missing checkout creates its workspace root", async (t) => {
+test("opening a missing checkout rejects without creating its workspace root", async (t) => {
   const context = await fixture(t);
   const missingRoot = join(context.root, "missing", "workspace");
 
-  const opened = await context.registry.openWorkspace(missingRoot);
-  assert.equal(opened.workspace.root, missingRoot);
-  assert.equal((await stat(missingRoot)).isDirectory(), true);
+  await assert.rejects(
+    () => context.registry.openWorkspace(missingRoot),
+    /Workspace root does not exist/,
+  );
+  await assert.rejects(() => stat(missingRoot), { code: "ENOENT" });
 });
 
 test("worktree opens require Git and create an isolated managed workspace", async (t) => {

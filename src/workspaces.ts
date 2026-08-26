@@ -5,7 +5,7 @@ import type {
   WorkspaceMode,
   WorkspaceStore,
 } from "./workspace-store.js";
-import { mkdir, opendir, readFile, realpath, stat } from "node:fs/promises";
+import { opendir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { loadProjectContextFiles } from "@earendil-works/pi-coding-agent";
 import type { ServerConfig } from "./config.js";
@@ -80,7 +80,6 @@ export interface OpenWorkspaceOptions {
 type PathStats = Stats;
 type DirectoryOps = {
   stat: (path: string) => Promise<PathStats>;
-  mkdir: (path: string, options: { recursive: true }) => Promise<unknown>;
 };
 
 export class WorkspaceRegistry {
@@ -473,7 +472,7 @@ async function canonicalPath(path: string): Promise<string> {
 
 export async function ensureCheckoutWorkspaceRoot(
   path: string,
-  ops: DirectoryOps = { stat, mkdir },
+  ops: DirectoryOps = { stat },
 ): Promise<PathStats> {
   try {
     return await ops.stat(path);
@@ -483,8 +482,7 @@ export async function ensureCheckoutWorkspaceRoot(
     }
   }
 
-  await ops.mkdir(path, { recursive: true });
-  return await ops.stat(path);
+  throw new Error(`Workspace root does not exist: ${path}`);
 }
 
 const CONTEXT_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]);

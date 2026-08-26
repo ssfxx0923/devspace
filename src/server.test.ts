@@ -209,6 +209,65 @@ test("native mode exposes the coding runtime tool surface without duplicate lega
   assert.doesNotMatch(instructions, /Do not create or modify files/i);
 });
 
+test("changes widget mode keeps ordinary tools data-only and reserves UI for checkpoints", async (t) => {
+  const context = await fixture(t, { git: true, toolMode: "native", widgets: "changes" });
+  const tools = await context.client.listTools();
+  const openWorkspace = tools.tools.find((tool) => tool.name === "open_workspace");
+  const read = tools.tools.find((tool) => tool.name === "read");
+  const execCommand = tools.tools.find((tool) => tool.name === "exec_command");
+  const showChanges = tools.tools.find((tool) => tool.name === "show_changes");
+
+  assert.ok(widgetResourceUri(openWorkspace));
+  assert.ok(widgetResourceUri(showChanges));
+  assert.equal(widgetResourceUri(read), undefined);
+  assert.equal(widgetResourceUri(execCommand), undefined);
+
+  const opened = await callOpen(context.client, context.project, "chat-checkpoint-ui");
+  const workspaceId = String(structuredContent(opened).workspaceId);
+  assert.ok(responseCardOptional(opened));
+
+  const readResult = await context.client.callTool({
+    name: "read",
+    arguments: { workspaceId, path: "AGENTS.md" },
+  });
+  assert.equal(responseCardOptional(readResult), undefined);
+
+  const checkpoint = await context.client.callTool({
+    name: "show_changes",
+    arguments: { workspaceId },
+  });
+  assert.ok(responseCardOptional(checkpoint));
+});
+
+test("configured file sharing exposes share_file and instructs the host to use returned URLs", async (t) => {
+  const context = await fixture(t, { toolMode: "native", fileShare: true });
+  const tools = await context.client.listTools();
+  const shareFile = tools.tools.find((tool) => tool.name === "share_file");
+  const openWorkspace = tools.tools.find((tool) => tool.name === "open_workspace");
+
+  assert.ok(shareFile);
+  assert.match(shareFile.description ?? "", /arbitrary binary files/i);
+  assert.match(shareFile.description ?? "", /returned URL is public/i);
+  assert.match(openWorkspace?.description ?? "", /use share_file/i);
+
+  const instructions = serverInstructions(context.config);
+  assert.match(instructions, /use share_file/i);
+  assert.match(instructions, /images, PDFs, archives, media, or arbitrary binary files/i);
+  assert.match(instructions, /returned public URL/i);
+
+  const opened = await callOpen(context.client, context.project, "chat-file-share");
+  assert.match(String(structuredContent(opened).instruction ?? ""), /use share_file/i);
+  assert.match(String(structuredContent(opened).instruction ?? ""), /Do not use read, base64/i);
+});
+
+test("file sharing stays absent when it is not configured", async (t) => {
+  const context = await fixture(t);
+  const tools = await context.client.listTools();
+
+  assert.equal(tools.tools.some((tool) => tool.name === "share_file"), false);
+  assert.doesNotMatch(serverInstructions(context.config), /use share_file/i);
+});
+
 interface ServerFixture {
   client: Client;
   project: string;
@@ -219,7 +278,12 @@ interface ServerFixture {
 
 async function fixture(
   t: TestContext,
-  options: { git?: boolean; toolMode?: "minimal" | "full" | "native" } = {},
+  options: {
+    git?: boolean;
+    toolMode?: "minimal" | "full" | "native";
+    widgets?: "off" | "changes" | "full";
+    fileShare?: boolean;
+  } = {},
 ): Promise<ServerFixture> {
   const root = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
   const project = join(root, "project");
@@ -245,8 +309,15 @@ async function fixture(
     DEVSPACE_ALLOWED_ROOTS: root,
     DEVSPACE_WORKTREE_ROOT: join(root, ".worktrees"),
     DEVSPACE_AGENT_DIR: agentDir,
-    DEVSPACE_WIDGETS: "full",
+    DEVSPACE_WIDGETS: options.widgets ?? "full",
     DEVSPACE_TOOL_MODE: options.toolMode ?? "full",
+    ...(options.fileShare
+      ? {
+          DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer",
+          DEVSPACE_FILE_SHARE_BASE_URL: "https://public.example.r2.dev",
+          DEVSPACE_FILE_SHARE_WRANGLER_AUTH: "oauth",
+        }
+      : {}),
     DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
     PORT: "1",
   });
@@ -321,9 +392,24 @@ function responseText(result: Awaited<ReturnType<Client["callTool"]>>): string {
 }
 
 function responseCard(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {
+  const card = responseCardOptional(result);
+  assert.ok(card);
+  return card;
+}
+
+function responseCardOptional(
+  result: Awaited<ReturnType<Client["callTool"]>>,
+): Record<string, unknown> | undefined {
   const metadata = result._meta;
-  assert.ok(metadata && typeof metadata === "object");
+  if (!metadata || typeof metadata !== "object") return undefined;
   const card = (metadata as Record<string, unknown>).card;
-  assert.ok(card && typeof card === "object");
-  return card as Record<string, unknown>;
+  return card && typeof card === "object" ? card as Record<string, unknown> : undefined;
+}
+
+function widgetResourceUri(tool: { _meta?: unknown } | undefined): string | undefined {
+  if (!tool?._meta || typeof tool._meta !== "object") return undefined;
+  const ui = (tool._meta as Record<string, unknown>).ui;
+  if (!ui || typeof ui !== "object") return undefined;
+  const resourceUri = (ui as Record<string, unknown>).resourceUri;
+  return typeof resourceUri === "string" ? resourceUri : undefined;
 }

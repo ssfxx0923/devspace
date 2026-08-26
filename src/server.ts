@@ -23,6 +23,7 @@ import {
   registerArtifactTools,
 } from "./artifact-tools.js";
 import { loadConfig, type ServerConfig, type WidgetMode } from "./config.js";
+import { shareFileToR2 } from "./file-share.js";
 import {
   createOpenAIIncomingArtifactAdapter,
   type IncomingArtifactAdapter,
@@ -81,6 +82,12 @@ const SHELL_TOOL_ANNOTATIONS = {
   idempotentHint: false,
   openWorldHint: true,
 };
+const FILE_SHARE_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+};
 
 interface RunningServer {
   app: ReturnType<typeof createMcpExpressApp>;
@@ -130,6 +137,13 @@ interface ToolWidgetDescriptorMeta {
   _meta: ToolDefinitionMeta | EmptyToolDefinitionMeta;
 }
 
+interface ToolResultCardMeta {
+  _meta: {
+    tool: string;
+    card: Record<string, unknown>;
+  };
+}
+
 function shouldAttachWidget(mode: WidgetMode, kind: ToolWidgetKind): boolean {
   switch (mode) {
     case "off":
@@ -157,6 +171,22 @@ function toolWidgetDescriptorMeta(
   };
 }
 
+function toolResultCardMeta(
+  config: ServerConfig,
+  kind: ToolWidgetKind,
+  tool: string,
+  card: Record<string, unknown>,
+): ToolResultCardMeta | Record<string, never> {
+  if (!shouldAttachWidget(config.widgets, kind)) return {};
+
+  return {
+    _meta: {
+      tool,
+      card,
+    },
+  };
+}
+
 const toolNames = {
   openWorkspace: "open_workspace",
   read: "read",
@@ -166,6 +196,7 @@ const toolNames = {
   glob: "glob",
   ls: "ls",
   shell: "bash",
+  shareFile: "share_file",
 } as const;
 
 interface ToolLogFields {
@@ -188,9 +219,12 @@ export function serverInstructions(config: ServerConfig): string {
     config.widgets === "changes"
       ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
       : "";
+  const fileShareInstruction = config.fileShare
+    ? ` When a file inside an open workspace must be transferred to the MCP host or ChatGPT as actual bytes, including images, PDFs, archives, media, or arbitrary binary files, use ${toolNames.shareFile} and pass its returned public URL. Prefer this over base64, copying binary content into text tools, or inventing a host-accessible local path. The returned URL is public until the configured remote storage removes it, so do not share secrets unless the user explicitly asks you to.`
+    : "";
 
   if (config.toolMode === "native") {
-    return `Use DevSpace as a local coding runtime. The MCP host is the coding agent; DevSpace does not delegate reasoning or coding work to another model or coding-agent provider. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for efficient workspace inspection. Use apply_patch when a structured patch is the clearest way to edit source code. Use exec_command naturally for normal local development operations, including git, rm, mv, cp, mkdir, package managers, generators, formatters, tests, builds, compilers, interpreters, Docker, and project scripts. Shell commands may create, modify, rename, move, or delete project files. Use write_stdin to poll or interact with running processes. Follow project instruction files and applicable skills. Before completing a coding task, run relevant tests and inspect the resulting changes when appropriate. Shell commands run with the authority of the local operating-system user and are not an OS sandbox.${artifactInstruction}${showChangesInstruction}`;
+    return `Use DevSpace as a local coding runtime. The MCP host is the coding agent; DevSpace does not delegate reasoning or coding work to another model or coding-agent provider. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for efficient workspace inspection. Use apply_patch when a structured patch is the clearest way to edit source code. Use exec_command naturally for normal local development operations, including git, rm, mv, cp, mkdir, package managers, generators, formatters, tests, builds, compilers, interpreters, Docker, and project scripts. Shell commands may create, modify, rename, move, or delete project files. Use write_stdin to poll or interact with running processes. Follow project instruction files and applicable skills. Before completing a coding task, run relevant tests and inspect the resulting changes when appropriate. Shell commands run with the authority of the local operating-system user and are not an OS sandbox.${artifactInstruction}${fileShareInstruction}${showChangesInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -203,7 +237,7 @@ export function serverInstructions(config: ServerConfig): string {
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
 
-  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching to a different project folder, changing checkout/worktree mode, the workspaceId is rejected as unknown, or a new isolated worktree is requested. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell.${artifactInstruction}${showChangesInstruction}`;
+  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching to a different project folder, changing checkout/worktree mode, the workspaceId is rejected as unknown, or a new isolated worktree is requested. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell.${artifactInstruction}${fileShareInstruction}${showChangesInstruction}`;
 }
 
 function resultOutputSchema(extra: z.ZodRawShape = {}): z.ZodRawShape {
@@ -477,6 +511,7 @@ function processOutputSchema(): z.ZodRawShape {
 }
 
 function processToolResponse(
+  config: ServerConfig,
   tool: "exec_command" | "write_stdin",
   workspaceId: string,
   snapshot: ProcessSnapshot,
@@ -487,14 +522,11 @@ function processToolResponse(
   const outputSummary = textSummary(snapshot.output ? [textBlock(snapshot.output)] : []);
   return {
     content,
-    _meta: {
-      tool,
-      card: {
-        workspaceId,
-        summary: { ...summary, ...outputSummary },
-        payload: { content },
-      },
-    },
+    ...toolResultCardMeta(config, "shell", tool, {
+      workspaceId,
+      summary: { ...summary, ...outputSummary },
+      payload: { content },
+    }),
     structuredContent: {
       result,
       sessionId: snapshot.sessionId,
@@ -578,7 +610,7 @@ function registerNativeProcessTools(
         durationMs: Math.round(performance.now() - startedAt),
       });
 
-      return processToolResponse("exec_command", workspaceId, snapshot, {
+      return processToolResponse(config, "exec_command", workspaceId, snapshot, {
         command: cmd,
         workingDirectory: workingDirectory ?? ".",
         running: snapshot.running,
@@ -640,13 +672,87 @@ function registerNativeProcessTools(
         durationMs: Math.round(performance.now() - startedAt),
       });
 
-      return processToolResponse("write_stdin", workspaceId, snapshot, {
+      return processToolResponse(config, "write_stdin", workspaceId, snapshot, {
         sessionId,
         charactersWritten: chars?.length ?? 0,
         running: snapshot.running,
         exitCode: snapshot.exitCode,
         wallTimeMs: snapshot.wallTimeMs,
       });
+    },
+  );
+}
+
+function registerFileShareTool(
+  server: McpServer,
+  config: ServerConfig,
+  workspaces: WorkspaceRegistry,
+): void {
+  const fileShare = config.fileShare;
+  if (!fileShare) return;
+
+  registerAppTool(
+    server,
+    "share_file",
+    {
+      title: "Share file",
+      description:
+        "Upload a regular file from an open workspace to the configured temporary public file-sharing store and return a URL that the MCP host or ChatGPT can fetch. Use this for images, PDFs, archives, media, and arbitrary binary files when a local path is not directly accessible to the host. The file must resolve inside the workspace root. The returned URL is public until the remote storage removes it.",
+      inputSchema: {
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        path: z
+          .string()
+          .describe("Path to the local file, relative to the workspace root or an absolute path inside it."),
+        contentType: z
+          .string()
+          .optional()
+          .describe("Optional MIME type override. By default DevSpace infers a MIME type from the filename."),
+      },
+      outputSchema: {
+        ...resultOutputSchema(),
+        url: z.string().url(),
+        key: z.string(),
+        path: z.string(),
+        bytes: z.number().int().nonnegative(),
+        mimeType: z.string(),
+      },
+      _meta: {},
+      annotations: FILE_SHARE_TOOL_ANNOTATIONS,
+    },
+    async ({ workspaceId, path, contentType }) => {
+      const startedAt = performance.now();
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const absolutePath = workspaces.resolvePath(workspace, path);
+      const shared = await shareFileToR2({
+        config: fileShare,
+        workspaceRoot: workspace.root,
+        absolutePath,
+        contentType,
+      });
+      const result = [
+        `Shared ${path} (${shared.bytes} bytes, ${shared.mimeType}).`,
+        shared.url,
+      ].join("\n");
+
+      logToolCall(config, {
+        tool: "share_file",
+        workspaceId,
+        path,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+
+      return {
+        content: [textBlock(result)],
+        structuredContent: {
+          result,
+          url: shared.url,
+          key: shared.key,
+          path,
+          bytes: shared.bytes,
+          mimeType: shared.mimeType,
+        },
+      };
     },
   );
 }
@@ -664,7 +770,7 @@ export function createMcpServer(
       title: "DevSpace",
       version: "0.1.0",
       description:
-        "Secure local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools.",
+        `Secure local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools.${config.fileShare ? " When configured, it can also publish local images, PDFs, archives, media, and arbitrary binary files through share_file so the MCP host can fetch their actual bytes." : ""}`,
     },
     {
       instructions: serverInstructions(config),
@@ -708,7 +814,7 @@ export function createMcpServer(
     {
       title: "Open workspace",
       description:
-        "Open a local project directory as a coding workspace. Call this once before working in a project or worktree, then reuse the returned workspaceId for later file, search, edit, show-changes, and shell calls. By default this opens the actual checkout; set mode=\"worktree\" when you need isolated or parallel work. Open another workspace when changing projects, switching modes, or starting another isolated worktree.",
+        `Open a local project directory as a coding workspace. Call this once before working in a project or worktree, then reuse the returned workspaceId for later file, search, edit, show-changes, and shell calls. By default this opens the actual checkout; set mode="worktree" when you need isolated or parallel work. Open another workspace when changing projects, switching modes, or starting another isolated worktree.${config.fileShare ? " When ChatGPT needs the actual bytes of a local image, PDF, archive, media file, or other binary file, open the containing workspace and use share_file instead of trying to read or encode the binary as text." : ""}`,
       inputSchema: {
         path: z
           .string()
@@ -785,17 +891,20 @@ export function createMcpServer(
       const visibleSkills = includeBootstrapContext ? cardSkills : [];
       const loadedAgentsFiles = includeBootstrapContext ? cardAgentsFiles : [];
       const availableAgentsFileOutputs = includeBootstrapContext ? cardAvailableAgentsFiles : [];
+      const fileShareWorkspaceInstruction = config.fileShare
+        ? " When ChatGPT needs to view, analyze, download, or otherwise consume the actual bytes of a local image, PDF, archive, media file, or arbitrary binary file, use share_file and use its returned public URL. Do not use read, base64, or an invented local path as a substitute for binary transport."
+        : "";
       const cardInstruction = config.skillsEnabled
-        ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, you switch to a different project folder or checkout/worktree mode, or the user requests a new isolated worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
-        : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, you switch to a different project folder or checkout/worktree mode, or the user requests a new isolated worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
+        ? `Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, you switch to a different project folder or checkout/worktree mode, or the user requests a new isolated worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding.${fileShareWorkspaceInstruction}`
+        : `Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, you switch to a different project folder or checkout/worktree mode, or the user requests a new isolated worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.${fileShareWorkspaceInstruction}`;
       const instruction = workspaceReused
         ? [
             `Workspace already open as ${workspace.id}.`,
             "Reuse this workspaceId for subsequent tool calls. This is the same checkout previously opened for this project in this conversation.",
-            "Continue following the project instructions, nested instruction files, skills, and diagnostics previously provided for this workspace. They remain the active workspace context and are not repeated here.",
+            `Continue following the project instructions, nested instruction files, skills, and diagnostics previously provided for this workspace. They remain the active workspace context and are not repeated here.${fileShareWorkspaceInstruction}`,
           ].join("\n\n")
         : workspace.mode === "worktree"
-          ? "Use this workspaceId for subsequent tool calls. Follow the project instructions, nested instruction files, skills, and diagnostics returned for this isolated worktree."
+          ? `Use this workspaceId for subsequent tool calls. Follow the project instructions, nested instruction files, skills, and diagnostics returned for this isolated worktree.${fileShareWorkspaceInstruction}`
           : cardInstruction;
       const resultContent: ToolContent[] = [
         {
@@ -831,29 +940,26 @@ export function createMcpServer(
 
       return {
         content: resultContent,
-        _meta: {
-          tool: "open_workspace",
-          card: {
-            workspaceId: workspace.id,
-            root: workspace.root,
-            path: workspace.root,
+        ...toolResultCardMeta(config, "workspace", "open_workspace", {
+          workspaceId: workspace.id,
+          root: workspace.root,
+          path: workspace.root,
+          mode: workspace.mode,
+          workspaceReused,
+          includeBootstrapContext,
+          sourceRoot: workspace.sourceRoot,
+          worktree: workspace.worktree,
+          agentsFiles: cardAgentsFiles,
+          availableAgentsFiles: cardAvailableAgentsFiles,
+          skills: cardSkills,
+          instruction: cardInstruction,
+          summary: {
             mode: workspace.mode,
-            workspaceReused,
-            includeBootstrapContext,
-            sourceRoot: workspace.sourceRoot,
-            worktree: workspace.worktree,
-            agentsFiles: cardAgentsFiles,
-            availableAgentsFiles: cardAvailableAgentsFiles,
-            skills: cardSkills,
-            instruction: cardInstruction,
-            summary: {
-              mode: workspace.mode,
-              agentsFiles: cardAgentsFiles.length,
-              availableAgentsFiles: cardAvailableAgentsFiles.length,
-              skills: cardSkills.length,
-            },
+            agentsFiles: cardAgentsFiles.length,
+            availableAgentsFiles: cardAvailableAgentsFiles.length,
+            skills: cardSkills.length,
           },
-        },
+        }),
         structuredContent: {
           workspaceId: workspace.id,
           root: workspace.root,
@@ -955,15 +1061,12 @@ export function createMcpServer(
 
       return {
         ...response,
-        _meta: {
-          tool: toolNames.read,
-          card: {
-            workspaceId,
-            path: input.path,
-            summary,
-            payload: { content: response.content },
-          },
-        },
+        ...toolResultCardMeta(config, "read", toolNames.read, {
+          workspaceId,
+          path: input.path,
+          summary,
+          payload: { content: response.content },
+        }),
         structuredContent: {
           result: contentText(response.content),
         },
@@ -1027,18 +1130,15 @@ export function createMcpServer(
 
       return {
         ...response,
-        _meta: {
-          tool: toolNames.write,
-          card: {
-            workspaceId,
-            path: input.path,
-            summary,
-            payload: {
-              content: response.content,
-              patch,
-            },
+        ...toolResultCardMeta(config, "write", toolNames.write, {
+          workspaceId,
+          path: input.path,
+          summary,
+          payload: {
+            content: response.content,
+            patch,
           },
-        },
+        }),
         structuredContent: {
           result: contentText(response.content),
         },
@@ -1116,18 +1216,15 @@ export function createMcpServer(
 
       return {
         content: editContent,
-        _meta: {
-          tool: toolNames.edit,
-          card: {
-            workspaceId,
-            path: input.path,
-            summary,
-            payload: {
-              diff: response.details?.diff,
-              patch: response.details?.patch,
-            },
+        ...toolResultCardMeta(config, "edit", toolNames.edit, {
+          workspaceId,
+          path: input.path,
+          summary,
+          payload: {
+            diff: response.details?.diff,
+            patch: response.details?.patch,
           },
-        },
+        }),
         structuredContent: {
           status: "applied",
           result: contentText(editContent),
@@ -1187,20 +1284,17 @@ export function createMcpServer(
 
         return {
           content,
-          _meta: {
-            tool: "apply_patch",
-            card: {
-              workspaceId,
-              path: displayPath,
-              summary: {
-                files: applied.files.length,
-                additions: applied.additions,
-                removals: applied.removals,
-              },
-              files: applied.files,
-              payload: { patch: applied.patch },
+          ...toolResultCardMeta(config, "edit", "apply_patch", {
+            workspaceId,
+            path: displayPath,
+            summary: {
+              files: applied.files.length,
+              additions: applied.additions,
+              removals: applied.removals,
             },
-          },
+            files: applied.files,
+            payload: { patch: applied.patch },
+          }),
           structuredContent: {
             result,
             additions: applied.additions,
@@ -1248,17 +1342,14 @@ export function createMcpServer(
 
         return {
           content,
-          _meta: {
-            tool: "show_changes",
-            card: {
-              workspaceId,
-              summary: review.summary,
-              files: review.files,
-              payload: {
-                patch: review.patch,
-              },
+          ...toolResultCardMeta(config, "show_changes", "show_changes", {
+            workspaceId,
+            summary: review.summary,
+            files: review.files,
+            payload: {
+              patch: review.patch,
             },
-          },
+          }),
           structuredContent: {
             result: contentText(content),
           },
@@ -1325,15 +1416,12 @@ export function createMcpServer(
 
         return {
           ...response,
-          _meta: {
-            tool: toolNames.grep,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
+          ...toolResultCardMeta(config, "search", toolNames.grep, {
+            workspaceId,
+            path: input.path,
+            summary,
+            payload: { content: response.content },
+          }),
           structuredContent: {
             result: contentText(response.content),
           },
@@ -1395,15 +1483,12 @@ export function createMcpServer(
 
         return {
           ...response,
-          _meta: {
-            tool: toolNames.glob,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
+          ...toolResultCardMeta(config, "search", toolNames.glob, {
+            workspaceId,
+            path: input.path,
+            summary,
+            payload: { content: response.content },
+          }),
           structuredContent: {
             result: contentText(response.content),
           },
@@ -1461,15 +1546,12 @@ export function createMcpServer(
 
         return {
           ...response,
-          _meta: {
-            tool: toolNames.ls,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
+          ...toolResultCardMeta(config, "directory", toolNames.ls, {
+            workspaceId,
+            path: input.path,
+            summary,
+            payload: { content: response.content },
+          }),
           structuredContent: {
             result: contentText(response.content),
           },
@@ -1553,15 +1635,12 @@ export function createMcpServer(
 
       return {
         ...response,
-        _meta: {
-          tool: toolNames.shell,
-          card: {
-            workspaceId,
-            path: workingDirectory,
-            summary,
-            payload: { content: response.content },
-          },
-        },
+        ...toolResultCardMeta(config, "shell", toolNames.shell, {
+          workspaceId,
+          path: workingDirectory,
+          summary,
+          payload: { content: response.content },
+        }),
         structuredContent: {
           result: contentText(response.content),
         },
@@ -1573,6 +1652,8 @@ export function createMcpServer(
   if (config.toolMode === "native") {
     registerNativeProcessTools(server, config, workspaces, processSessions);
   }
+
+  registerFileShareTool(server, config, workspaces);
 
   if (config.artifactsEnabled && isArtifactDownloadSupportedPlatform()) {
     registerArtifactTools(server, {

@@ -226,12 +226,13 @@ If a skill appears in `open_workspace`, the model must read that skill's
 
 ## Review Card Does Not Appear
 
-Per-tool widget cards are enabled by default with:
+The aggregate review-card flow is enabled by default with:
 
 ```bash
-DEVSPACE_WIDGETS=full
+DEVSPACE_WIDGETS=changes
 ```
 
-The aggregate `show_changes` tool is only exposed with
-`DEVSPACE_WIDGETS=changes`. Plain MCP clients may ignore ChatGPT Apps widget
-metadata and only show text results.
+In this mode, ordinary coding tools are data-only and `show_changes` produces a
+single checkpoint card after a coherent set of edits. Set `DEVSPACE_WIDGETS=full`
+only when you explicitly want a card for individual tool calls. Plain MCP clients
+may ignore ChatGPT Apps widget metadata and only show text results.

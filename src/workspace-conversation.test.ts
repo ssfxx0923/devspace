@@ -150,25 +150,33 @@ test("checkout reuse survives a registry restart", async (t) => {
   assert.equal(restored.workspace.id, first.workspace.id);
 });
 
-test("a deleted checkout is replaced with a new workspace", async (t) => {
+test("a deleted checkout is not recreated automatically and can be reopened after explicit recreation", async (t) => {
   const { project, registry } = await fixture(t);
   const first = await registry.openWorkspace(project, { conversationScopeId: "chat-1" });
 
   await rm(project, { recursive: true, force: true });
+  await assert.rejects(
+    () => registry.openWorkspace(project, { conversationScopeId: "chat-1" }),
+    /Workspace root does not exist/,
+  );
+  await assert.rejects(() => stat(project), { code: "ENOENT" });
+
+  await mkdir(project, { recursive: true });
   const replacement = await registry.openWorkspace(project, { conversationScopeId: "chat-1" });
 
   assert.notEqual(replacement.workspace.id, first.workspace.id);
   assert.equal((await stat(project)).isDirectory(), true);
 });
 
-test("canonical checkout identity remains stable when the requested target starts missing", async (t) => {
+test("canonical checkout identity remains stable for a nested existing target", async (t) => {
   const { project, registry } = await fixture(t);
-  const missingTarget = join(project, "generated", "checkout");
+  const nestedTarget = join(project, "generated", "checkout");
+  await mkdir(nestedTarget, { recursive: true });
 
-  const first = await registry.openWorkspace(missingTarget, { conversationScopeId: "chat-1" });
-  const second = await registry.openWorkspace(missingTarget, { conversationScopeId: "chat-1" });
+  const first = await registry.openWorkspace(nestedTarget, { conversationScopeId: "chat-1" });
+  const second = await registry.openWorkspace(nestedTarget, { conversationScopeId: "chat-1" });
 
-  assert.equal(first.workspace.root, missingTarget);
+  assert.equal(first.workspace.root, nestedTarget);
   assert.equal(second.workspace.id, first.workspace.id);
 });
 
@@ -276,6 +284,7 @@ test("an inactive persisted checkout binding is not reused", async (t) => {
 test("a checkout replaced by a file reports the filesystem error", async (t) => {
   const context = await fixture(t);
   const target = join(context.root, "file-target");
+  await mkdir(target, { recursive: true });
   await context.registry.openWorkspace(target, { conversationScopeId: "chat-1" });
   await rm(target, { recursive: true, force: true });
   await writeFile(target, "not a directory\n");

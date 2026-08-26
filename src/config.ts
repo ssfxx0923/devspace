@@ -7,9 +7,18 @@ import { devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
 
 export type ToolMode = "minimal" | "full" | "native";
 export type WidgetMode = "off" | "changes" | "full";
+export type FileShareWranglerAuth = "inherit" | "oauth";
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const DEFAULT_ARTIFACT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_FILE_SHARE_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+export interface FileShareConfig {
+  bucket: string;
+  publicBaseUrl: string;
+  wranglerAuth: FileShareWranglerAuth;
+  maxFileBytes: number;
+}
 
 export interface ServerConfig {
   host: string;
@@ -24,6 +33,7 @@ export interface ServerConfig {
   worktreeRoot: string;
   artifactsEnabled: boolean;
   artifactMaxFileBytes: number;
+  fileShare?: FileShareConfig;
   skillsEnabled: boolean;
   skillPaths: string[];
   devspaceSkillsDir: string;
@@ -155,10 +165,48 @@ function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
 }
 
 function parseWidgetMode(value: string | undefined): WidgetMode {
-  if (!value || value === "full") return "full";
-  if (value === "off" || value === "changes") return value;
+  if (!value || value === "changes") return "changes";
+  if (value === "off" || value === "full") return value;
 
   throw new Error(`Invalid DEVSPACE_WIDGETS: ${value}`);
+}
+
+function parseFileShareWranglerAuth(value: string | undefined): FileShareWranglerAuth {
+  if (!value || value === "inherit") return "inherit";
+  if (value === "oauth") return "oauth";
+  throw new Error(`Invalid DEVSPACE_FILE_SHARE_WRANGLER_AUTH: ${value}`);
+}
+
+function parseFileShareConfig(
+  env: NodeJS.ProcessEnv,
+  fileConfig: ReturnType<typeof loadDevspaceFiles>["config"],
+): FileShareConfig | undefined {
+  const bucket = (env.DEVSPACE_FILE_SHARE_BUCKET ?? fileConfig.fileShare?.bucket)?.trim();
+  const publicBaseUrl = (
+    env.DEVSPACE_FILE_SHARE_BASE_URL ?? fileConfig.fileShare?.publicBaseUrl
+  )?.trim();
+
+  if (!bucket && !publicBaseUrl) return undefined;
+  if (!bucket) {
+    throw new Error("DEVSPACE_FILE_SHARE_BUCKET is required when file sharing is configured.");
+  }
+  if (!publicBaseUrl) {
+    throw new Error("DEVSPACE_FILE_SHARE_BASE_URL is required when file sharing is configured.");
+  }
+
+  return {
+    bucket,
+    publicBaseUrl: parsePublicBaseUrl(publicBaseUrl),
+    wranglerAuth: parseFileShareWranglerAuth(
+      env.DEVSPACE_FILE_SHARE_WRANGLER_AUTH ?? fileConfig.fileShare?.wranglerAuth,
+    ),
+    maxFileBytes: parsePositiveInteger(
+      env.DEVSPACE_FILE_SHARE_MAX_FILE_BYTES
+        ?? numberConfigValue(fileConfig.fileShare?.maxFileBytes),
+      DEFAULT_FILE_SHARE_MAX_FILE_BYTES,
+      "DEVSPACE_FILE_SHARE_MAX_FILE_BYTES",
+    ),
+  };
 }
 
 function parseRequiredSecret(value: string | undefined, name: string): string {
@@ -242,6 +290,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       DEFAULT_ARTIFACT_MAX_FILE_BYTES,
       "DEVSPACE_ARTIFACT_MAX_FILE_BYTES",
     ),
+    fileShare: parseFileShareConfig(env, files.config),
     skillsEnabled: env.DEVSPACE_SKILLS === undefined ? true : parseBoolean(env.DEVSPACE_SKILLS),
     skillPaths: parsePathList(env.DEVSPACE_SKILL_PATHS),
     devspaceSkillsDir: devspaceSkillsDir(env),

@@ -11,7 +11,7 @@ const baseEnv = {
   DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
 };
 
-assert.equal(loadConfig(baseEnv).widgets, "full");
+assert.equal(loadConfig(baseEnv).widgets, "changes");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "changes" }).widgets, "changes");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "full" }).widgets, "full");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "off" }).widgets, "off");
@@ -26,6 +26,7 @@ assert.equal(loadConfig(baseEnv).skillsEnabled, true);
 assert.equal(loadConfig(baseEnv).devspaceSkillsDir, join(emptyConfigDir, "skills"));
 assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
 assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
+assert.equal(loadConfig(baseEnv).fileShare, undefined);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_ARTIFACTS: "1" }).artifactsEnabled, true);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "123" }).artifactMaxFileBytes,
@@ -33,6 +34,22 @@ assert.equal(
 );
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_SKILLS: "0" }).skillsEnabled, false);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_SKILLS: "1" }).skillsEnabled, true);
+
+assert.deepEqual(
+  loadConfig({
+    ...baseEnv,
+    DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer",
+    DEVSPACE_FILE_SHARE_BASE_URL: "https://public.example.r2.dev/",
+    DEVSPACE_FILE_SHARE_WRANGLER_AUTH: "oauth",
+    DEVSPACE_FILE_SHARE_MAX_FILE_BYTES: "456",
+  }).fileShare,
+  {
+    bucket: "devspace-transfer",
+    publicBaseUrl: "https://public.example.r2.dev",
+    wranglerAuth: "oauth",
+    maxFileBytes: 456,
+  },
+);
 
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "invalid" }),
@@ -49,6 +66,19 @@ assert.throws(
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "invalid" }),
   /Invalid DEVSPACE_TOOL_MODE: invalid/,
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer" }),
+  /DEVSPACE_FILE_SHARE_BASE_URL is required/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer",
+    DEVSPACE_FILE_SHARE_BASE_URL: "https:\/\/public.example.r2.dev",
+    DEVSPACE_FILE_SHARE_WRANGLER_AUTH: "invalid",
+  }),
+  /Invalid DEVSPACE_FILE_SHARE_WRANGLER_AUTH: invalid/,
 );
 
 assert.deepEqual(loadConfig(baseEnv).logging, {
@@ -158,6 +188,12 @@ writeFileSync(
     publicBaseUrl: "https://devspace.example.com",
     artifactsEnabled: true,
     artifactMaxFileBytes: 321,
+    fileShare: {
+      bucket: "persisted-transfer",
+      publicBaseUrl: "https://persisted.example.r2.dev/",
+      wranglerAuth: "oauth",
+      maxFileBytes: 654,
+    },
   }),
 );
 writeFileSync(
@@ -173,6 +209,12 @@ assert.equal(fileConfig.oauth.ownerToken, "persisted-owner-token-long-enough");
 assert.equal(fileConfig.publicBaseUrl, "https://devspace.example.com");
 assert.equal(fileConfig.artifactsEnabled, true);
 assert.equal(fileConfig.artifactMaxFileBytes, 321);
+assert.deepEqual(fileConfig.fileShare, {
+  bucket: "persisted-transfer",
+  publicBaseUrl: "https://persisted.example.r2.dev",
+  wranglerAuth: "oauth",
+  maxFileBytes: 654,
+});
 assert.deepEqual(fileConfig.allowedHosts, [
   "localhost",
   "127.0.0.1",

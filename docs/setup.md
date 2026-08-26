@@ -11,6 +11,10 @@ projects through DevSpace.
 - Bash, including Git Bash or WSL on Windows
 - a public HTTPS URL that forwards to the local DevSpace server
 
+Wrangler and Cloudflare API credentials are not general DevSpace requirements.
+They are needed only if you explicitly configure the optional outbound file-sharing
+feature.
+
 DevSpace does not create the public tunnel for you. Use Cloudflare Tunnel,
 ngrok, Pinggy, Tailscale Funnel, or your own HTTPS reverse proxy.
 
@@ -118,7 +122,8 @@ npx @waishnav/devspace doctor
 ```
 
 The doctor command reports the resolved config, Node version, Node ABI, platform,
-Git, Bash, public URL, allowed hosts, and SQLite native dependency status.
+Git, Bash, public URL, allowed hosts, and SQLite native dependency status. It
+checks Wrangler only when optional outbound file sharing is configured.
 
 ## Running From A Local Checkout
 

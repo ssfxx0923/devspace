@@ -20,6 +20,12 @@ export interface DevspaceUserConfig {
   artifactsEnabled?: boolean;
   artifactMaxFileBytes?: number;
   agentDir?: string;
+  fileShare?: {
+    bucket?: string;
+    publicBaseUrl?: string;
+    wranglerAuth?: "inherit" | "oauth";
+    maxFileBytes?: number;
+  };
 }
 
 export interface DevspaceAuthConfig {

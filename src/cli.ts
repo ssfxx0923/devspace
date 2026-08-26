@@ -6,6 +6,7 @@ import * as prompts from "@clack/prompts";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 import { satisfies } from "semver";
 import { loadConfig } from "./config.js";
+import { shareFileToR2 } from "./file-share.js";
 import {
   generateOwnerToken,
   loadDevspaceFiles,
@@ -13,12 +14,12 @@ import {
   writeDevspaceConfig,
   type DevspaceUserConfig,
 } from "./user-config.js";
-import { expandHomePath } from "./roots.js";
+import { assertAllowedPath, expandHomePath, isPathInsideRoot } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 
-type Command = "serve" | "init" | "doctor" | "config" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "config" | "share" | "help" | "version";
 const require = createRequire(import.meta.url);
-const SUPPORTED_NODE_RANGE = ">=20.12 <27";
+const SUPPORTED_NODE_RANGE = ">=22.19 <27";
 
 async function main(argv: string[]): Promise<void> {
   assertSupportedNode();
@@ -40,6 +41,9 @@ async function main(argv: string[]): Promise<void> {
     case "config":
       runConfigCommand(args);
       return;
+    case "share":
+      await runShare(args);
+      return;
     case "help":
       printHelp();
       return;
@@ -51,7 +55,9 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "config") return command;
+  if (command === "init" || command === "doctor" || command === "config" || command === "share") {
+    return command;
+  }
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -130,6 +136,7 @@ async function runInit({ force }: { force: boolean }): Promise<void> {
     }));
 
     const config: DevspaceUserConfig = {
+      ...files.config,
       host: files.config.host ?? "127.0.0.1",
       port,
       allowedRoots,
@@ -231,9 +238,60 @@ async function runDoctor(): Promise<void> {
     console.log(`Public MCP URL: ${new URL("/mcp", config.publicBaseUrl).toString()}`);
     console.log(`Allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`Allowed hosts: ${config.allowedHosts.join(", ")}`);
+    console.log(
+      `File sharing: ${
+        config.fileShare
+          ? `${config.fileShare.bucket} -> ${config.fileShare.publicBaseUrl} (${checkWranglerAvailable()})`
+          : "disabled (optional; Wrangler and Cloudflare credentials are not required)"
+      }`,
+    );
   } catch (error) {
     console.log(`Config status: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+async function runShare(args: string[]): Promise<void> {
+  const { path, contentType } = parseShareArgs(args);
+  const config = loadConfig();
+  if (!config.fileShare) {
+    throw new Error(
+      "File sharing is not configured. Set fileShare.bucket and fileShare.publicBaseUrl in ~/.devspace/config.json or use DEVSPACE_FILE_SHARE_BUCKET and DEVSPACE_FILE_SHARE_BASE_URL.",
+    );
+  }
+
+  const absolutePath = assertAllowedPath(resolve(expandHomePath(path)), config.allowedRoots);
+  const workspaceRoot = config.allowedRoots.find((root) => isPathInsideRoot(absolutePath, root));
+  if (!workspaceRoot) {
+    throw new Error(`Path is outside configured DevSpace roots: ${path}`);
+  }
+
+  const shared = await shareFileToR2({
+    config: config.fileShare,
+    workspaceRoot,
+    absolutePath,
+    contentType,
+  });
+  console.log(shared.url);
+}
+
+function parseShareArgs(args: string[]): { path: string; contentType?: string } {
+  let path: string | undefined;
+  let contentType: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--content-type") {
+      const value = args[index + 1];
+      if (!value) throw new Error("Missing value for --content-type.");
+      contentType = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) throw new Error(`Unknown share option: ${arg}`);
+    if (path) throw new Error("devspace share accepts exactly one file path.");
+    path = arg;
+  }
+  if (!path) throw new Error("Usage: devspace share <file> [--content-type <mime>]");
+  return { path, contentType };
 }
 
 function runConfigCommand(args: string[]): void {
@@ -276,6 +334,7 @@ function printHelp(): void {
       "  devspace doctor          Show config, runtime, and native dependency status",
       "  devspace config get      Print persisted config",
       "  devspace config set publicBaseUrl <url|null>",
+      "  devspace share <file>    Upload a local file to the configured temporary public store",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",
@@ -398,6 +457,20 @@ function checkBashShell(): string {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return `unavailable (${message})`;
+  }
+}
+
+function checkWranglerAvailable(): string {
+  try {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const version = execFileSync("wrangler", ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return `Wrangler ${version || "available"}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Wrangler unavailable; file sharing will not work (${message})`;
   }
 }
 

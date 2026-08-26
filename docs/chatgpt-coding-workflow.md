@@ -161,13 +161,16 @@ tools, not arbitrary shell commands.
 
 ## Show Changes
 
-By default, `DEVSPACE_WIDGETS=full`.
+By default, `DEVSPACE_WIDGETS=changes`.
 
-In that mode, DevSpace attaches widget UI to the exposed workspace, file, edit,
-and shell tools. The aggregate `show_changes` tool is not exposed by default.
+In that mode, ordinary coding tools remain data-only. DevSpace attaches widget
+UI only to `open_workspace` and the aggregate `show_changes` checkpoint tool.
+This avoids creating a new iframe-backed app card for every `read`, search,
+edit, or shell call in long ChatGPT conversations.
 
-Use `DEVSPACE_WIDGETS=off` to disable widget UI, or `DEVSPACE_WIDGETS=changes`
-to expose the aggregate show-changes flow.
+Use `DEVSPACE_WIDGETS=off` to disable widget UI entirely. Use
+`DEVSPACE_WIDGETS=full` only when per-tool cards are intentionally useful for
+debugging or UI development.
 
 When `show_changes` is exposed, call it exactly once after the final file
 modification in any turn that changes files. It shows the combined changes for

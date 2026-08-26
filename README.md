@@ -142,6 +142,12 @@ DevSpace gives ChatGPT tools to:
 - discover local agent skills from your skill folders
 - show tool cards and optional change summaries in ChatGPT Apps-compatible hosts
 
+Outbound file sharing through Cloudflare R2 is optional and disabled by default.
+When it is not configured, DevSpace does not expose `share_file`, invoke Wrangler,
+or require Cloudflare credentials. See the
+[configuration reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md#temporary-outbound-file-sharing)
+if you want to enable it.
+
 ## Mental Model
 
 The MCP host is the coding agent. DevSpace is remote access to selected local folders and the local development runtime.

@@ -24,6 +24,7 @@ npx @waishnav/devspace serve
 npx @waishnav/devspace doctor
 npx @waishnav/devspace config get
 npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
+npx @waishnav/devspace share ./path/to/file.bin
 ```
 
 ## Core Environment Variables
@@ -70,6 +71,62 @@ paths, embedded credentials, or extra object fields.
 There is no artifact root, total quota, TTL, pinning, persistent database record,
 or background artifact cleanup service. See [Native File Download](artifact-exchange.md)
 for the supported connector shape and security boundaries.
+
+## Temporary Outbound File Sharing
+
+Temporary outbound file sharing is an optional feature. It is disabled by
+default and is not required for normal workspace, filesystem, shell, Git,
+artifact-download, or review operations. When disabled, DevSpace does not
+expose the `share_file` MCP tool, invoke Wrangler, or require Cloudflare
+credentials.
+
+When explicitly configured, DevSpace can publish a local workspace file to a temporary public
+Cloudflare R2 bucket. This is useful when an MCP host such as ChatGPT needs the
+actual bytes of a local image, PDF, archive, media file, or other binary file and
+cannot access the local filesystem path directly.
+
+When configured, DevSpace exposes a `share_file` MCP tool and a matching CLI:
+
+```bash
+devspace share ./build/result.pdf
+```
+
+The CLI prints only the public URL on success, which makes it easy to paste or
+pipe elsewhere. `share_file` returns the URL plus object metadata to the MCP
+host. Files must resolve inside the active workspace root for the MCP tool, and
+inside one of `DEVSPACE_ALLOWED_ROOTS` for the CLI. Symlinks that resolve outside
+those roots are rejected.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DEVSPACE_FILE_SHARE_BUCKET` | unset | Cloudflare R2 bucket used for uploads. |
+| `DEVSPACE_FILE_SHARE_BASE_URL` | unset | Public origin for objects, typically the bucket's `r2.dev` URL or a custom domain. |
+| `DEVSPACE_FILE_SHARE_WRANGLER_AUTH` | `inherit` | `inherit` passes Cloudflare auth environment variables through. `oauth` removes API token/key env vars so Wrangler uses its stored OAuth login. |
+| `DEVSPACE_FILE_SHARE_MAX_FILE_BYTES` | `104857600` | Maximum size of one shared file (100 MiB). |
+
+The equivalent persisted configuration is:
+
+```json
+{
+  "fileShare": {
+    "bucket": "devspace-transfer",
+    "publicBaseUrl": "https://pub-example.r2.dev",
+    "wranglerAuth": "oauth",
+    "maxFileBytes": 104857600
+  }
+}
+```
+
+The optional feature requires a locally installed `wrangler` CLI plus either
+Cloudflare API credentials or an existing Wrangler OAuth login. DevSpace invokes
+the local `wrangler r2 object put ... --remote` command and
+generates an opaque object key containing a UUID. It infers common MIME types
+from the filename and otherwise uses `application/octet-stream`.
+
+The returned URL is public. Expiration and deletion are owned by the configured
+R2 bucket, not by DevSpace, so configure an R2 lifecycle rule appropriate for
+your use case. Do not use public file sharing for secrets unless that exposure is
+explicitly intended.
 
 ## OAuth
 
@@ -118,8 +175,8 @@ OS sandbox.
 
 | Value | Behavior |
 | --- | --- |
-| `full` | Default. Widget UI is attached to exposed workspace, file, edit, and shell tools. |
-| `changes` | Enables the aggregate `show_changes` tool and attaches widget UI to `open_workspace` and `show_changes`. |
+| `changes` | Default. Ordinary coding tools stay data-only. Widget UI is attached only to `open_workspace` and the aggregate `show_changes` checkpoint tool. |
+| `full` | Opt-in diagnostic mode. Widget UI is attached to exposed workspace, file, edit, search, directory, and shell tools. This can create many iframe-backed cards in long ChatGPT conversations. |
 | `off` | Disables widget UI. |
 
 ## Skills
@@ -176,7 +233,7 @@ DEVSPACE_PUBLIC_BASE_URL="https://devspace.example.com" \
 DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
 DEVSPACE_ARTIFACTS="1" \
 DEVSPACE_TOOL_MODE="native" \
-DEVSPACE_WIDGETS="full" \
+DEVSPACE_WIDGETS="changes" \
 npx @waishnav/devspace serve
 ```
 
