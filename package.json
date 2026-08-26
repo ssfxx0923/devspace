@@ -1,5 +1,5 @@
 {
-  "name": "@waishnav/devspace",
+  "name": "@ssfxx44533/devspace",
   "version": "1.0.9",
   "description": "Expose a secure local coding workspace through an MCP server.",
   "type": "module",
@@ -34,6 +34,14 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ssfxx0923/devspace.git"
+  },
+  "homepage": "https://github.com/ssfxx0923/devspace#readme",
+  "bugs": {
+    "url": "https://github.com/ssfxx0923/devspace/issues"
+  },
   "dependencies": {
     "@clack/prompts": "^1.5.1",
     "@earendil-works/pi-coding-agent": "^0.80.3",

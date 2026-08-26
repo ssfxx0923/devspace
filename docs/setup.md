@@ -23,7 +23,7 @@ ngrok, Pinggy, Tailscale Funnel, or your own HTTPS reverse proxy.
 Run:
 
 ```bash
-npx @waishnav/devspace init
+npx @ssfxx44533/devspace init
 ```
 
 The setup flow asks one question at a time.
@@ -83,20 +83,20 @@ https://your-tunnel-host.example.com/mcp
 Run:
 
 ```bash
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace serve
 ```
 
 If your tunnel URL changes for one run, override it without rewriting config:
 
 ```bash
-DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @waishnav/devspace serve
+DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @ssfxx44533/devspace serve
 ```
 
 For a stable public URL, persist it:
 
 ```bash
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace config set publicBaseUrl https://devspace.example.com
+npx @ssfxx44533/devspace serve
 ```
 
 ## Approve The Client
@@ -118,7 +118,7 @@ Keep `auth.json` private.
 Run:
 
 ```bash
-npx @waishnav/devspace doctor
+npx @ssfxx44533/devspace doctor
 ```
 
 The doctor command reports the resolved config, Node version, Node ABI, platform,

@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <img src="https://raw.githubusercontent.com/Waishnav/devspace/main/docs/assets/devspace-logo-light.png" alt="DevSpace logo" width="140">
+    <img src="https://raw.githubusercontent.com/ssfxx0923/devspace/main/docs/assets/devspace-logo-light.png" alt="DevSpace logo" width="140">
   </picture>
 </p>
 
@@ -9,12 +9,12 @@
 <p align="center">A local coding MCP runtime for ChatGPT.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@waishnav/devspace"><img alt="npm" src="https://img.shields.io/npm/v/%40waishnav%2Fdevspace?style=flat-square" /></a>
-  <a href="https://github.com/Waishnav/devspace/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Waishnav/devspace/ci.yml?style=flat-square&branch=main" /></a>
-  <a href="https://github.com/Waishnav/devspace/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/npm/l/%40waishnav%2Fdevspace?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@ssfxx44533/devspace"><img alt="npm" src="https://img.shields.io/npm/v/%40ssfxx44533%2Fdevspace?style=flat-square" /></a>
+  <a href="https://github.com/ssfxx0923/devspace/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ssfxx0923/devspace/ci.yml?style=flat-square&branch=main" /></a>
+  <a href="https://github.com/ssfxx0923/devspace/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/npm/l/%40ssfxx44533%2Fdevspace?style=flat-square" /></a>
 </p>
 
-[![DevSpace connected to ChatGPT](https://raw.githubusercontent.com/Waishnav/devspace/main/docs/assets/devspace-screenshot.png)](https://raw.githubusercontent.com/Waishnav/devspace/main/docs/assets/devspace-screenshot.png)
+[![DevSpace connected to ChatGPT](https://raw.githubusercontent.com/ssfxx0923/devspace/main/docs/assets/devspace-screenshot.png)](https://raw.githubusercontent.com/ssfxx0923/devspace/main/docs/assets/devspace-screenshot.png)
 
 **ChatGPT is the coding agent. DevSpace is the local runtime and tool layer.**
 
@@ -62,7 +62,7 @@ DevSpace requires Node `>=22.19 <27`.
 Install the DevSpace CLI:
 
 ```bash
-npm install -g @waishnav/devspace
+npm install -g @ssfxx44533/devspace
 ```
 
 Then initialize and start the server:
@@ -75,8 +75,8 @@ devspace serve
 Or run it without a global install:
 
 ```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace init
+npx @ssfxx44533/devspace serve
 ```
 
 During setup, DevSpace asks for:
@@ -145,7 +145,7 @@ DevSpace gives ChatGPT tools to:
 Outbound file sharing through Cloudflare R2 is optional and disabled by default.
 When it is not configured, DevSpace does not expose `share_file`, invoke Wrangler,
 or require Cloudflare credentials. See the
-[configuration reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md#temporary-outbound-file-sharing)
+[configuration reference](https://github.com/ssfxx0923/devspace/blob/main/docs/configuration.md#temporary-outbound-file-sharing)
 if you want to enable it.
 
 ## Mental Model
@@ -182,12 +182,12 @@ devspace doctor
 
 ## Documentation
 
-- [Setup Guide](https://github.com/Waishnav/devspace/blob/main/docs/setup.md)
-- [ChatGPT Coding Workflow](https://github.com/Waishnav/devspace/blob/main/docs/chatgpt-coding-workflow.md)
-- [Configuration Reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md)
-- [Native File Download](https://github.com/Waishnav/devspace/blob/main/docs/artifact-exchange.md)
-- [Security Model](https://github.com/Waishnav/devspace/blob/main/docs/security.md)
-- [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
+- [Setup Guide](https://github.com/ssfxx0923/devspace/blob/main/docs/setup.md)
+- [ChatGPT Coding Workflow](https://github.com/ssfxx0923/devspace/blob/main/docs/chatgpt-coding-workflow.md)
+- [Configuration Reference](https://github.com/ssfxx0923/devspace/blob/main/docs/configuration.md)
+- [Native File Download](https://github.com/ssfxx0923/devspace/blob/main/docs/artifact-exchange.md)
+- [Security Model](https://github.com/ssfxx0923/devspace/blob/main/docs/security.md)
+- [Troubleshooting Gotchas](https://github.com/ssfxx0923/devspace/blob/main/docs/gotchas.md)
 
 ## Philosophy
 

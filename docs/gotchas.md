@@ -7,8 +7,8 @@ This page collects the setup issues users are most likely to hit.
 Use `npx`:
 
 ```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace init
+npx @ssfxx44533/devspace serve
 ```
 
 If you installed globally, confirm npm's global bin directory is on `PATH`.
@@ -40,7 +40,7 @@ npm rebuild better-sqlite3
 Then run:
 
 ```bash
-npx @waishnav/devspace doctor
+npx @ssfxx44533/devspace doctor
 ```
 
 Release starts run a native dependency check before launching.
@@ -62,7 +62,7 @@ https://your-tunnel-host.example.com/mcp
 If you saved the wrong value:
 
 ```bash
-npx @waishnav/devspace config set publicBaseUrl https://your-tunnel-host.example.com
+npx @ssfxx44533/devspace config set publicBaseUrl https://your-tunnel-host.example.com
 ```
 
 ## Tunnel URL Changed
@@ -72,13 +72,13 @@ Temporary tunnels often change URLs between runs.
 For a one-off run:
 
 ```bash
-DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @waishnav/devspace serve
+DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @ssfxx44533/devspace serve
 ```
 
 For a stable URL:
 
 ```bash
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
+npx @ssfxx44533/devspace config set publicBaseUrl https://devspace.example.com
 ```
 
 ## Host Header Or 403 Problems
@@ -88,7 +88,7 @@ DevSpace derives allowed hosts from the configured public URL.
 Run:
 
 ```bash
-npx @waishnav/devspace doctor
+npx @ssfxx44533/devspace doctor
 ```
 
 Confirm the public URL hostname appears in allowed hosts. If you changed tunnel
@@ -97,7 +97,7 @@ URLs, update `publicBaseUrl`.
 Use this only for intentional local debugging:
 
 ```bash
-DEVSPACE_ALLOWED_HOSTS="*" npx @waishnav/devspace serve
+DEVSPACE_ALLOWED_HOSTS="*" npx @ssfxx44533/devspace serve
 ```
 
 ## OAuth Redirect Host Rejected
@@ -113,7 +113,7 @@ localhost
 If another MCP client uses a different redirect host, configure:
 
 ```bash
-DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS="chatgpt.com,example.com" npx @waishnav/devspace serve
+DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS="chatgpt.com,example.com" npx @ssfxx44533/devspace serve
 ```
 
 ## Owner Password Not Accepted
@@ -127,7 +127,7 @@ Make sure you are entering the Owner password from:
 To regenerate setup:
 
 ```bash
-npx @waishnav/devspace init --force
+npx @ssfxx44533/devspace init --force
 ```
 
 ## Unknown `workspaceId`
@@ -161,13 +161,13 @@ The path must be inside one of the allowed roots configured during setup.
 Run:
 
 ```bash
-npx @waishnav/devspace config get
+npx @ssfxx44533/devspace config get
 ```
 
 Then either open a project under an allowed root or rerun setup:
 
 ```bash
-npx @waishnav/devspace init --force
+npx @ssfxx44533/devspace init --force
 ```
 
 ## Worktree Mode Fails
@@ -195,7 +195,7 @@ Install Git for Windows and use Git Bash, or use WSL, MSYS2, or Cygwin Bash.
 Run:
 
 ```bash
-npx @waishnav/devspace doctor
+npx @ssfxx44533/devspace doctor
 ```
 
 Confirm Bash is detected.
@@ -205,7 +205,7 @@ Confirm Bash is detected.
 Skills are enabled by default. Check:
 
 ```bash
-DEVSPACE_SKILLS=1 npx @waishnav/devspace serve
+DEVSPACE_SKILLS=1 npx @ssfxx44533/devspace serve
 ```
 
 DevSpace looks in standard Agent Skills locations:

@@ -13,18 +13,18 @@ The default files are:
 Use another config directory with:
 
 ```bash
-DEVSPACE_CONFIG_DIR=/path/to/config npx @waishnav/devspace serve
+DEVSPACE_CONFIG_DIR=/path/to/config npx @ssfxx44533/devspace serve
 ```
 
 ## Commands
 
 ```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
-npx @waishnav/devspace doctor
-npx @waishnav/devspace config get
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
-npx @waishnav/devspace share ./path/to/file.bin
+npx @ssfxx44533/devspace init
+npx @ssfxx44533/devspace serve
+npx @ssfxx44533/devspace doctor
+npx @ssfxx44533/devspace config get
+npx @ssfxx44533/devspace config set publicBaseUrl https://devspace.example.com
+npx @ssfxx44533/devspace share ./path/to/file.bin
 ```
 
 ## Core Environment Variables
@@ -46,7 +46,7 @@ Native-file download is disabled by default. Enable it when ChatGPT needs to han
 an attached or generated file into an already-open workspace:
 
 ```bash
-DEVSPACE_ARTIFACTS=1 npx @waishnav/devspace serve
+DEVSPACE_ARTIFACTS=1 npx @ssfxx44533/devspace serve
 ```
 
 This feature currently supports Linux. It is not registered on macOS, Windows,
@@ -204,7 +204,7 @@ Example:
 
 ```bash
 DEVSPACE_SKILL_PATHS="$HOME/.claude/skills,$HOME/company/skills" \
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace serve
 ```
 
 ## Logging
@@ -234,7 +234,7 @@ DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
 DEVSPACE_ARTIFACTS="1" \
 DEVSPACE_TOOL_MODE="native" \
 DEVSPACE_WIDGETS="changes" \
-npx @waishnav/devspace serve
+npx @ssfxx44533/devspace serve
 ```
 
 The environment assignments must be part of the same command invocation, or
