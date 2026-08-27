@@ -6,7 +6,6 @@ import {
 } from "@modelcontextprotocol/ext-apps";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
-  isEditTool,
   isExpandableCard,
   isInitiallyExpandedCard,
   isPatchTool,
@@ -14,7 +13,7 @@ import {
   isReviewTool,
   isToolName,
   isToolResultCard,
-  isWriteTool,
+  isWorkspaceTool,
   payloadText,
   type HostContext,
   type ToolName,
@@ -106,7 +105,7 @@ async function boot(): Promise<void> {
     applyHostContext();
     // Workspace details inherit host variables directly. Rebuilding their DOM on
     // iframe resize would reset an in-progress instruction preview interaction.
-    if (card?.tool !== "open_workspace") renderPayloadIfNeeded();
+    if (!card || !isWorkspaceTool(card.tool)) renderPayloadIfNeeded();
   };
 
   app.onteardown = async () => {
@@ -236,7 +235,7 @@ async function renderPayloadIfNeeded(): Promise<void> {
     return;
   }
 
-  if (card.tool === "open_workspace") {
+  if (isWorkspaceTool(card.tool)) {
     renderWorkspacePayload(target, card);
     return;
   }
@@ -306,7 +305,7 @@ async function renderPayloadIfNeeded(): Promise<void> {
 }
 
 function shouldUseHeavyPayload(card: ToolResultCard): boolean {
-  return isReadTool(card.tool) || isEditTool(card.tool) || isWriteTool(card.tool);
+  return isReadTool(card.tool);
 }
 
 function unmountPayload(): void {
@@ -507,6 +506,34 @@ function renderWorkspacePayload(container: HTMLElement, card: ToolResultCard): v
       card.sourceRoot,
       toolIcons.sourceCheckout,
       true,
+    );
+  }
+
+  if (card.contextRevision || card.contextStatus) {
+    const status = card.contextStatus === "refresh_required" ? "refresh required" : "current";
+    appendWorkspaceTextRow(
+      rows,
+      "Context",
+      `${card.contextRevision ?? "No accepted revision"} · ${status}`,
+      toolIcons.instructions,
+      true,
+    );
+  }
+
+  if (card.changes && card.changes.length > 0) {
+    const changeChips = card.changes.map((change) => ({
+      label: `${change.kind ?? "changed"} ${change.path ?? "context"}`,
+      title: [change.contextKind, change.active === true ? "active" : "available"]
+        .filter(Boolean)
+        .join(" · "),
+    }));
+    const changeList = renderWorkspaceChips(changeChips);
+    changeList.classList.add("workspace-skills-list");
+    appendWorkspaceRow(
+      rows,
+      "Changes",
+      changeList,
+      toolIcons.diff,
     );
   }
 

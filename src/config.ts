@@ -5,7 +5,6 @@ import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
 import { devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
 
-export type ToolMode = "minimal" | "full" | "native";
 export type WidgetMode = "off" | "changes" | "full";
 export type FileShareWranglerAuth = "inherit" | "oauth";
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
@@ -27,7 +26,6 @@ export interface ServerConfig {
   allowedRoots: string[];
   allowedHosts: string[];
   publicBaseUrl: string;
-  toolMode: ToolMode;
   widgets: WidgetMode;
   stateDir: string;
   worktreeRoot: string;
@@ -92,16 +90,15 @@ function parseBoolean(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value?.toLowerCase() ?? "");
 }
 
-function parseToolMode(env: NodeJS.ProcessEnv): ToolMode {
-  const mode = env.DEVSPACE_TOOL_MODE;
-  if (mode === "native" || mode === "codex") return "native";
-  if (mode === "minimal" || mode === "full") return mode;
-  if (mode) throw new Error(`Invalid DEVSPACE_TOOL_MODE: ${mode}`);
+function rejectLegacyToolMode(env: NodeJS.ProcessEnv): void {
+  const configured = ["DEVSPACE_TOOL_MODE", "DEVSPACE_MINIMAL_TOOLS"]
+    .filter((name) => env[name] !== undefined);
+  if (configured.length === 0) return;
 
-  if (env.DEVSPACE_MINIMAL_TOOLS !== undefined) {
-    return parseBoolean(env.DEVSPACE_MINIMAL_TOOLS) ? "minimal" : "full";
-  }
-  return "native";
+  throw new Error(
+    `${configured.join(" and ")} ${configured.length === 1 ? "is" : "are"} no longer supported. `
+      + "Remove the legacy tool-mode configuration; DevSpace now exposes the native tool surface only.",
+  );
 }
 
 function parseLogLevel(value: string | undefined): LogLevel {
@@ -255,6 +252,7 @@ function defaultAgentDir(): string {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
+  rejectLegacyToolMode(env);
   const files = loadDevspaceFiles(env);
   const host = env.HOST ?? files.config.host ?? "127.0.0.1";
   const port = parsePort(env.PORT ?? files.config.port);
@@ -277,7 +275,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     allowedRoots: parseAllowedRoots(env.DEVSPACE_ALLOWED_ROOTS ?? files.config.allowedRoots),
     allowedHosts: parseAllowedHosts(env.DEVSPACE_ALLOWED_HOSTS, derivedAllowedHosts),
     publicBaseUrl,
-    toolMode: parseToolMode(env),
     widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
     stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
     worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),

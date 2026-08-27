@@ -36,6 +36,15 @@ type PatchAction =
   | { kind: "delete"; path: string }
   | { kind: "update"; path: string; moveTo?: string; hunks: UpdateHunk[] };
 
+export function patchTargetPaths(patch: string): string[] {
+  const paths = new Set<string>();
+  for (const action of parsePatch(patch)) {
+    paths.add(action.path);
+    if (action.kind === "update" && action.moveTo) paths.add(action.moveTo);
+  }
+  return [...paths];
+}
+
 interface TextFile {
   content: string;
   mode?: number;

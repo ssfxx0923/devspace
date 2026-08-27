@@ -118,6 +118,8 @@ export function registerArtifactTools(
     },
     async (input) => executeArtifactTool(config, input, async () => {
       const workspace = workspaces.getWorkspace(input.workspaceId);
+      const targetPath = workspaces.resolvePath(workspace, input.path);
+      await workspaces.assertWorkspaceContextCurrent(workspace, [targetPath]);
       const downloaded = await downloadIncomingArtifact({
         registry: incomingRegistry,
         workspaceId: workspace.id,

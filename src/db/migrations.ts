@@ -22,6 +22,11 @@ const migrations: Migration[] = [
     name: "workspace-conversation-bindings",
     up: migrateWorkspaceConversationBindings,
   },
+  {
+    version: 5,
+    name: "workspace-context-state",
+    up: migrateWorkspaceContextState,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -159,6 +164,38 @@ function migrateWorkspaceConversationBindings(sqlite: Database.Database): void {
 
     create index if not exists workspace_conversation_bindings_workspace_idx
       on workspace_conversation_bindings(workspace_session_id);
+  `);
+}
+
+function migrateWorkspaceContextState(sqlite: Database.Database): void {
+  sqlite.exec(`
+    create table if not exists activated_skills (
+      workspace_session_id text not null,
+      path text not null,
+      base_dir text not null,
+      content_hash text not null,
+      content text not null,
+      activated_at text not null,
+      last_seen_at text not null,
+      primary key (workspace_session_id, path),
+      foreign key (workspace_session_id)
+        references workspace_sessions(id)
+        on delete cascade
+    );
+
+    create index if not exists activated_skills_workspace_idx
+      on activated_skills(workspace_session_id);
+
+    create table if not exists workspace_context_states (
+      workspace_session_id text primary key,
+      revision text not null,
+      available_agent_files_json text not null,
+      skills_json text not null,
+      refreshed_at text not null,
+      foreign key (workspace_session_id)
+        references workspace_sessions(id)
+        on delete cascade
+    );
   `);
 }
 

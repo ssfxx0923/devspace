@@ -132,9 +132,10 @@ npx @ssfxx44533/devspace init --force
 
 ## Unknown `workspaceId`
 
-`workspaceId` values are session identifiers. If the server restarts and the
-client receives an unknown workspace error, call `open_workspace` again for that
-project.
+`workspaceId` values are persisted workspace-session identifiers. DevSpace can
+restore one after a server restart while its root remains allowed and available.
+If the client nevertheless receives an unknown workspace error, call
+`open_workspace` again for that project.
 
 Workspace session metadata is persisted. ChatGPT may provide optional
 conversation metadata that lets DevSpace resume the same checkout workspace for
@@ -144,6 +145,18 @@ mode always creates a new isolated workspace with its own complete context.
 Hosts without supported conversation metadata receive a normal new workspace.
 In all cases, continue passing the `workspaceId` returned by `open_workspace` to
 later tools. Other MCP hosts use this explicit workspace workflow as well.
+
+## Workspace Context Is Stale
+
+DevSpace blocks a mutation when a loaded root instruction, a nested instruction
+that was read, or an activated skill changed on disk. Call
+`refresh_workspace_context` with the existing `workspaceId`, review the complete
+returned snapshot and change list, then retry the blocked operation.
+
+An instruction or `SKILL.md` read with `offset` or `limit` is partial and does
+not activate that context. Read it again without either option. A newly
+discovered nested instruction must be read in full before modifying files or
+starting a command with a working directory under its directory.
 
 To review work, call `show_changes` once after the final related file change. It
 shows the combined changes and advances the review point automatically.
@@ -222,7 +235,8 @@ It also checks compatibility and custom paths:
 Legacy project paths such as `.pi/skills` can be added through `DEVSPACE_SKILL_PATHS` when needed.
 
 If a skill appears in `open_workspace`, the model must read that skill's
-`SKILL.md` before reading other files inside the skill directory.
+`SKILL.md` in full, without `offset` or `limit`, before reading other files
+inside the skill directory.
 
 ## Review Card Does Not Appear
 
@@ -232,7 +246,8 @@ The aggregate review-card flow is enabled by default with:
 DEVSPACE_WIDGETS=changes
 ```
 
-In this mode, ordinary coding tools are data-only and `show_changes` produces a
+In this mode, ordinary coding tools are data-only; workspace open/context
+refresh and `show_changes` can produce cards, with `show_changes` providing a
 single checkpoint card after a coherent set of edits. Set `DEVSPACE_WIDGETS=full`
 only when you explicitly want a card for individual tool calls. Plain MCP clients
 may ignore ChatGPT Apps widget metadata and only show text results.

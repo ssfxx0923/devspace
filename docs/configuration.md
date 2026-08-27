@@ -146,21 +146,16 @@ MCP clients discover metadata from:
 /.well-known/oauth-authorization-server
 ```
 
-## Tool Modes
+## Tool Surface
 
-`DEVSPACE_TOOL_MODE` controls the tool surface.
+DevSpace exposes one native coding tool surface: `open_workspace`,
+`refresh_workspace_context`, `read`, `grep`, `glob`, `ls`, `apply_patch`,
+`exec_command`, `write_stdin`, `list_processes`, and `terminate_process`.
 
-| Value | Behavior |
-| --- | --- |
-| `native` | Default. Exposes `open_workspace`, `read`, `grep`, `glob`, `ls`, `apply_patch`, `exec_command`, and `write_stdin`. |
-| `minimal` | Exposes `open_workspace`, `read`, `write`, `edit`, and `bash`. Clients use `bash` with tools such as `rg`, `find`, and `ls` for inspection. |
-| `full` | Exposes the minimal tools plus dedicated `grep`, `glob`, and `ls` tools. |
-| `codex` | Deprecated compatibility alias for `native`. |
-
-`DEVSPACE_MINIMAL_TOOLS` remains a backward-compatible alias when
-`DEVSPACE_TOOL_MODE` is unset: `1` selects `minimal` and `0` selects `full`.
-When `DEVSPACE_TOOL_MODE=codex` is present in an older configuration, DevSpace
-normalizes it to `native`. The name does not enable a Codex integration.
+The former `minimal` and `full` modes and their `DEVSPACE_TOOL_MODE` and
+`DEVSPACE_MINIMAL_TOOLS` settings have been removed. Delete either setting from
+an existing configuration before starting DevSpace; startup rejects them with a
+migration error instead of silently changing the exposed tools.
 
 Native-mode commands run without a PTY by default. Set `tty: true` on
 `exec_command` for interactive terminal programs. PTY support uses the optional
@@ -169,13 +164,26 @@ sessions. Commands may create, modify, move, rename, or delete workspace files.
 They run with the authority of the local operating-system user and are not an
 OS sandbox.
 
+Every `exec_command` response includes a session ID. Running and completed
+sessions can be rediscovered with `list_processes`; completed sessions remain
+available for five minutes. `terminate_process` requests SIGTERM and is safe to
+repeat for a retained completed session. Process sessions are memory-resident
+and do not survive a DevSpace server restart. `yieldTimeMs` is capped at 30
+seconds per call; a process can continue beyond that window and be polled.
+
+Workspace instruction and activated-skill content is persisted as an accepted
+context revision. Mutating tools reject changed active context, and applicable
+nested instruction files must be read in full before operations under their
+directories. `refresh_workspace_context` accepts the current filesystem state
+and returns the full context plus changes from the previous revision.
+
 ## Widgets
 
 `DEVSPACE_WIDGETS` controls ChatGPT Apps iframe usage.
 
 | Value | Behavior |
 | --- | --- |
-| `changes` | Default. Ordinary coding tools stay data-only. Widget UI is attached only to `open_workspace` and the aggregate `show_changes` checkpoint tool. |
+| `changes` | Default. Ordinary coding tools stay data-only. Widget UI is attached only to `open_workspace`, `refresh_workspace_context`, and the aggregate `show_changes` checkpoint tool. |
 | `full` | Opt-in diagnostic mode. Widget UI is attached to exposed workspace, file, edit, search, directory, and shell tools. This can create many iframe-backed cards in long ChatGPT conversations. |
 | `off` | Disables widget UI. |
 
@@ -232,7 +240,6 @@ DEVSPACE_ALLOWED_ROOTS="$HOME/personal,$HOME/work" \
 DEVSPACE_PUBLIC_BASE_URL="https://devspace.example.com" \
 DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
 DEVSPACE_ARTIFACTS="1" \
-DEVSPACE_TOOL_MODE="native" \
 DEVSPACE_WIDGETS="changes" \
 npx @ssfxx44533/devspace serve
 ```

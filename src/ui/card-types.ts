@@ -2,17 +2,17 @@ import type { App } from "@modelcontextprotocol/ext-apps";
 
 export type ToolName =
   | "open_workspace"
+  | "refresh_workspace_context"
   | "show_changes"
   | "apply_patch"
   | "exec_command"
   | "write_stdin"
+  | "list_processes"
+  | "terminate_process"
   | "read"
-  | "write"
-  | "edit"
   | "grep"
   | "glob"
-  | "ls"
-  | "bash";
+  | "ls";
 
 export type HostContext = NonNullable<ReturnType<App["getHostContext"]>>;
 
@@ -42,6 +42,9 @@ export interface ToolResultCard {
     managed?: boolean;
   };
   status?: string;
+  contextRevision?: string;
+  contextStatus?: "current" | "refresh_required";
+  refreshedAt?: string;
   summary?: Record<string, unknown>;
   files?: Array<{
     path?: string;
@@ -63,6 +66,14 @@ export interface ToolResultCard {
     name?: string;
     description?: string;
     path?: string;
+    activated?: boolean;
+    content?: string;
+  }>;
+  changes?: Array<{
+    path?: string;
+    kind?: "added" | "modified" | "deleted";
+    contextKind?: "instruction" | "skill";
+    active?: boolean;
   }>;
   instruction?: string;
 }
@@ -83,30 +94,22 @@ export interface ToolPayload {
 export function isToolName(value: unknown): value is ToolName {
   return (
     value === "open_workspace" ||
+    value === "refresh_workspace_context" ||
     value === "show_changes" ||
     value === "apply_patch" ||
     value === "exec_command" ||
     value === "write_stdin" ||
+    value === "list_processes" ||
+    value === "terminate_process" ||
     value === "read" ||
-    value === "write" ||
-    value === "edit" ||
     value === "grep" ||
     value === "glob" ||
-    value === "ls" ||
-    value === "bash"
+    value === "ls"
   );
 }
 
 export function isReadTool(tool: ToolName): boolean {
   return tool === "read";
-}
-
-export function isWriteTool(tool: ToolName): boolean {
-  return tool === "write";
-}
-
-export function isEditTool(tool: ToolName): boolean {
-  return tool === "edit";
 }
 
 export function isPatchTool(tool: ToolName): boolean {
@@ -118,11 +121,15 @@ export function isSearchTool(tool: ToolName): boolean {
 }
 
 export function isShellTool(tool: ToolName): boolean {
-  return tool === "bash" || tool === "exec_command" || tool === "write_stdin";
+  return tool === "exec_command" || tool === "write_stdin";
 }
 
 export function isReviewTool(tool: ToolName): boolean {
   return tool === "show_changes";
+}
+
+export function isWorkspaceTool(tool: ToolName): boolean {
+  return tool === "open_workspace" || tool === "refresh_workspace_context";
 }
 
 export function isToolResultCard(value: unknown): value is Omit<ToolResultCard, "tool"> {
@@ -150,7 +157,7 @@ export function summaryNumber(
 }
 
 export function isExpandableCard(card: ToolResultCard): boolean {
-  if (card.tool === "open_workspace") {
+  if (isWorkspaceTool(card.tool)) {
     return (
       Number(card.summary?.agentsFiles ?? 0) > 0 ||
       Number(card.summary?.skills ?? 0) > 0 ||
@@ -158,6 +165,9 @@ export function isExpandableCard(card: ToolResultCard): boolean {
       Boolean(card.availableAgentsFiles?.length) ||
       Boolean(card.skills?.length) ||
       Boolean(card.worktree) ||
+      Boolean(card.contextRevision) ||
+      Boolean(card.contextStatus) ||
+      Boolean(card.changes?.length) ||
       Boolean(card.instruction)
     );
   }
@@ -169,7 +179,7 @@ export function isExpandableCard(card: ToolResultCard): boolean {
 }
 
 export function isInitiallyExpandedCard(card: ToolResultCard): boolean {
-  if (card.tool === "open_workspace") return isExpandableCard(card);
+  if (isWorkspaceTool(card.tool)) return isExpandableCard(card);
   if (isReviewTool(card.tool)) return isExpandableCard(card);
   if (isPatchTool(card.tool)) {
     return card.files?.length === 1 && isExpandableCard(card);

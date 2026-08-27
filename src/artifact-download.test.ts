@@ -32,6 +32,7 @@ const root = await mkdtemp(join(tmpdir(), "devspace-artifact-download-test-"));
 
 try {
   testOneToolContract();
+  await testArtifactContextGuard();
   testPlatformSupportContract();
   if (isArtifactDownloadSupportedPlatform()) {
     await testSafeDownloadAndConflict(join(root, "downloads"));
@@ -47,6 +48,52 @@ try {
   testLogRedaction();
 } finally {
   await rm(root, { recursive: true, force: true });
+}
+
+async function testArtifactContextGuard(): Promise<void> {
+  let callback: ((input: Record<string, unknown>) => Promise<unknown>) | undefined;
+  const server = {
+    registerTool(
+      _name: string,
+      _descriptor: Record<string, unknown>,
+      toolCallback: (input: Record<string, unknown>) => Promise<unknown>,
+    ) {
+      callback = toolCallback;
+      return {};
+    },
+  };
+  let guardedPath: string | undefined;
+  const workspaceRoot = join(root, "guarded-workspace");
+  const workspaces = {
+    getWorkspace: () => ({ id: "ws_guarded", root: workspaceRoot }),
+    resolvePath: (_workspace: unknown, path: string) => join(workspaceRoot, path),
+    assertWorkspaceContextCurrent: async (_workspace: unknown, paths: string[]) => {
+      guardedPath = paths[0];
+      throw new Error("workspace context is stale");
+    },
+  };
+
+  registerArtifactTools(server as never, {
+    config: {
+      artifactMaxFileBytes: 1024,
+      logging: { toolCalls: false },
+    } as never,
+    workspaces: workspaces as never,
+  });
+  assert.ok(callback);
+  const invoke = callback;
+  await assert.rejects(
+    () => invoke({
+      file: {
+        download_url: "https://files.example.test/file",
+        file_id: "file_1",
+      },
+      workspaceId: "ws_guarded",
+      path: "nested/file.bin",
+    }),
+    /workspace context is stale/,
+  );
+  assert.equal(guardedPath, join(workspaceRoot, "nested", "file.bin"));
 }
 
 function testOneToolContract(): void {

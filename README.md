@@ -18,7 +18,7 @@
 
 **ChatGPT is the coding agent. DevSpace is the local runtime and tool layer.**
 
-DevSpace is a self-hosted MCP server that lets ChatGPT and other MCP hosts directly work with local projects through workspace-scoped filesystem tools, native shell execution, persistent process sessions, Git worktrees, artifacts, and change review. DevSpace does not invoke another coding model or coding-agent provider behind the scenes.
+DevSpace is a self-hosted MCP server that lets ChatGPT and other MCP hosts directly work with local projects through workspace-scoped filesystem tools, native shell execution, tracked process sessions, Git worktrees, artifacts, and change review. DevSpace does not invoke another coding model or coding-agent provider behind the scenes.
 
 ## Sponsors and Special Thanks
 
@@ -136,10 +136,11 @@ DevSpace gives ChatGPT tools to:
 - read and search files inside the opened workspace
 - apply structured patches for precise source changes
 - run normal local development commands, including file operations, Git, package managers, generators, tests, builds, and project scripts
-- keep long-running and interactive processes available through persistent process sessions
+- recover, inspect, interact with, and explicitly terminate long-running process sessions while the server remains running
 - use isolated Git worktrees for parallel coding sessions
 - follow project instructions from `AGENTS.md` and `CLAUDE.md`
 - discover local agent skills from your skill folders
+- detect changed active instructions or skills and refresh an explicit, persisted workspace context revision before more mutations run
 - show tool cards and optional change summaries in ChatGPT Apps-compatible hosts
 
 Outbound file sharing through Cloudflare R2 is optional and disabled by default.

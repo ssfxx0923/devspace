@@ -2,11 +2,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { FileStream, getFiletypeFromFileName } from "@pierre/diffs";
 import type { FileStreamOptions } from "@pierre/diffs";
-import { PatchDiff } from "@pierre/diffs/react";
 import {
-  isEditTool,
   isReadTool,
-  isWriteTool,
   payloadText,
   summaryNumber,
   type HostContext,
@@ -55,13 +52,6 @@ function HeavyPayload({
 
   if (errorMessage) {
     return <StatusLine message={errorMessage} tone="error" />;
-  }
-
-  if (isEditTool(card.tool) || isWriteTool(card.tool)) {
-    const patch = card.payload?.patch || card.payload?.diff;
-    if (!patch) return <StatusLine message="Diff payload is not available." />;
-
-    return <DiffPayload patch={patch} themeType={themeType} />;
   }
 
   const text = payloadText(card.payload);
@@ -137,38 +127,6 @@ function FilePayload({
   }, [fileOptions, path, startLine, text]);
 
   return <div ref={wrapperRef} className="pierre-file pretty-scrollbar" />;
-}
-
-function DiffPayload({
-  patch,
-  themeType,
-}: {
-  patch: string;
-  themeType: ThemeType;
-}) {
-  return (
-    <PatchDiff
-      patch={patch}
-      options={{
-        theme: {
-          light: "pierre-light",
-          dark: "pierre-dark",
-        },
-        themeType,
-        diffStyle: "unified",
-        diffIndicators: "bars",
-        hunkSeparators: "line-info",
-        lineDiffType: "word-alt",
-        overflow: "scroll",
-        unsafeCSS: pierrePrettyScrollbarCss,
-        collapsedContextThreshold: 4,
-        expansionLineCount: 20,
-        stickyHeader: true,
-        disableFileHeader: true,
-      }}
-      className="pierre-diff pretty-scrollbar"
-    />
-  );
 }
 
 function StatusLine({

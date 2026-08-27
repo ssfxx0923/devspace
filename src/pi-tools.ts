@@ -1,19 +1,12 @@
 import {
-  createBashTool,
-  createEditTool,
   createFindTool,
   createGrepTool,
   createLsTool,
   createReadTool,
-  createWriteTool,
-  type BashToolInput,
-  type EditToolInput,
-  type EditToolDetails,
   type FindToolInput,
   type GrepToolInput,
   type LsToolInput,
   type ReadToolInput,
-  type WriteToolInput,
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { resolveAllowedPath } from "./roots.js";
@@ -77,26 +70,6 @@ export async function readFileTool(input: ReadToolInput, context: ToolContext): 
   }, context);
 }
 
-export async function writeFileTool(input: WriteToolInput, context: ToolContext): Promise<ToolResponse> {
-  const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
-  const tool = createWriteTool(context.cwd);
-
-  return runTool((params) => tool.execute("write_file", params), {
-    path,
-    content: input.content,
-  }, context);
-}
-
-export async function editFileTool(input: EditToolInput, context: ToolContext): Promise<ToolResponse<EditToolDetails>> {
-  const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
-  const tool = createEditTool(context.cwd);
-
-  return runTool((params) => tool.execute("edit_file", params), {
-    path,
-    edits: input.edits,
-  }, context);
-}
-
 export async function grepFilesTool(input: GrepToolInput, context: ToolContext): Promise<ToolResponse> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createGrepTool(context.cwd);
@@ -116,14 +89,4 @@ export async function listDirectoryTool(input: LsToolInput, context: ToolContext
   const tool = createLsTool(context.cwd);
 
   return runTool((params) => tool.execute("list_directory", params), input, context);
-}
-
-export async function runShellTool(input: BashToolInput, context: ToolContext): Promise<ToolResponse> {
-  const tool = createBashTool(context.cwd);
-  const timeout = input.timeout === undefined ? 30 : Math.min(input.timeout, 300);
-
-  return runTool((params) => tool.execute("run_shell", params), {
-    command: input.command,
-    timeout,
-  }, context);
 }

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  isEditTool,
   isExpandableCard,
   isInitiallyExpandedCard,
   isPatchTool,
@@ -10,18 +9,23 @@ import {
 } from "./card-types.js";
 
 test("the supported coding tools are recognized as card tools", () => {
-  for (const tool of ["apply_patch", "exec_command", "write_stdin"]) {
+  for (const tool of [
+    "apply_patch",
+    "exec_command",
+    "write_stdin",
+    "list_processes",
+    "terminate_process",
+    "refresh_workspace_context",
+  ]) {
     assert.equal(isToolName(tool), true, `${tool} should be a recognized card tool`);
   }
 });
 
-test("tool classification distinguishes patch, edit, and shell operations", () => {
+test("tool classification distinguishes patch and shell operations", () => {
   assert.equal(isPatchTool("apply_patch"), true);
-  assert.equal(isEditTool("apply_patch"), false);
   assert.equal(isShellTool("apply_patch"), false);
   assert.equal(isShellTool("exec_command"), true);
   assert.equal(isShellTool("write_stdin"), true);
-  assert.equal(isEditTool("exec_command"), false);
 });
 
 test("a patch card expands only when it contains patch content", () => {
@@ -90,4 +94,14 @@ test("a workspace card expands when it contains available instruction files", ()
 
 test("an empty workspace card stays collapsed", () => {
   assert.equal(isExpandableCard({ tool: "open_workspace" }), false);
+});
+
+test("a refreshed workspace context opens with its revision", () => {
+  assert.equal(
+    isInitiallyExpandedCard({
+      tool: "refresh_workspace_context",
+      contextRevision: "ctx_123",
+    }),
+    true,
+  );
 });

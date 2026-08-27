@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -174,8 +174,8 @@ test("checkout reuse and context suppression survive a registry restart", async 
   }
 });
 
-test("native mode exposes the coding runtime tool surface without duplicate legacy tools", async (t) => {
-  const context = await fixture(t, { toolMode: "native" });
+test("the server exposes only the native coding runtime tool surface", async (t) => {
+  const context = await fixture(t);
   const tools = await context.client.listTools();
   const names = tools.tools.map((tool) => tool.name).sort();
 
@@ -184,9 +184,12 @@ test("native mode exposes the coding runtime tool surface without duplicate lega
     "exec_command",
     "glob",
     "grep",
+    "list_processes",
     "ls",
     "open_workspace",
     "read",
+    "refresh_workspace_context",
+    "terminate_process",
     "write_stdin",
   ]);
   for (const legacyName of ["bash", "write", "edit"]) {
@@ -194,12 +197,24 @@ test("native mode exposes the coding runtime tool surface without duplicate lega
   }
 
   const execCommand = tools.tools.find((tool) => tool.name === "exec_command");
+  const refreshContext = tools.tools.find((tool) => tool.name === "refresh_workspace_context");
+  const listProcesses = tools.tools.find((tool) => tool.name === "list_processes");
+  const terminateProcess = tools.tools.find((tool) => tool.name === "terminate_process");
   assert.ok(execCommand?.description);
   assert.match(execCommand.description, /may create, modify, rename, move, or delete files/i);
   assert.match(execCommand.description, /rm, mv, cp, mkdir/i);
   assert.match(execCommand.description, /not an OS sandbox/i);
   assert.doesNotMatch(execCommand.description, /must not modify project files/i);
   assert.doesNotMatch(execCommand.description, /do not create or modify files/i);
+  assert.equal(
+    ((execCommand.outputSchema as { required?: string[] } | undefined)?.required ?? [])
+      .includes("sessionId"),
+    true,
+  );
+  assert.equal(refreshContext?.annotations?.readOnlyHint, false);
+  assert.match(refreshContext?.description ?? "", /complete recoverable context snapshot/i);
+  assert.match(listProcesses?.description ?? "", /five minutes/i);
+  assert.equal(terminateProcess?.annotations?.idempotentHint, true);
 
   const instructions = serverInstructions(context.config);
   assert.match(instructions, /The MCP host is the coding agent/i);
@@ -209,15 +224,222 @@ test("native mode exposes the coding runtime tool surface without duplicate lega
   assert.doesNotMatch(instructions, /Do not create or modify files/i);
 });
 
+test("refresh_workspace_context recovers a stale workspace before commands resume", async (t) => {
+  const context = await fixture(t);
+  const opened = await callOpen(context.client, context.project, "chat-context-refresh");
+  const workspaceId = String(structuredContent(opened).workspaceId);
+  const originalRevision = String(structuredContent(opened).contextRevision);
+  assert.equal(structuredContent(opened).contextStatus, "current");
+
+  await writeFile(join(context.project, "AGENTS.md"), "updated project instructions\n");
+  const reopened = await callOpen(context.client, context.project, "chat-context-refresh");
+  assert.equal(structuredContent(reopened).contextStatus, "refresh_required");
+  const blocked = await context.client.callTool({
+    name: "exec_command",
+    arguments: {
+      workspaceId,
+      cmd: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
+      yieldTimeMs: 2_000,
+    },
+  });
+  assert.equal(blocked.isError, true);
+  assert.match(responseText(blocked), /workspace context is stale/i);
+  assert.match(responseText(blocked), /refresh_workspace_context/i);
+
+  const refreshed = await context.client.callTool({
+    name: "refresh_workspace_context",
+    arguments: { workspaceId },
+  });
+  assert.notEqual(structuredContent(refreshed).contextRevision, originalRevision);
+  assert.equal(
+    (structuredContent(refreshed).agentsFiles as Array<{ path: string; content: string }>)
+      .some((file) => file.path === "AGENTS.md" && /updated project/.test(file.content)),
+    true,
+  );
+  assert.equal(
+    (structuredContent(refreshed).changes as Array<Record<string, unknown>>)
+      .some((change) => change.path === "AGENTS.md" && change.kind === "modified"),
+    true,
+  );
+  assert.equal(responseCard(refreshed).contextStatus, "current");
+  assert.equal(responseCard(refreshed).contextRevision, structuredContent(refreshed).contextRevision);
+
+  const retried = await context.client.callTool({
+    name: "exec_command",
+    arguments: {
+      workspaceId,
+      cmd: `${JSON.stringify(process.execPath)} -e "console.log('context-current')"`,
+      yieldTimeMs: 2_000,
+    },
+  });
+  assert.notEqual(retried.isError, true);
+  assert.equal(typeof structuredContent(retried).sessionId, "number");
+  assert.equal(structuredContent(retried).running, false);
+  assert.match(responseText(retried), /context-current/);
+});
+
+test("nested instruction scope blocks patches until the instruction is read in full", async (t) => {
+  const context = await fixture(t);
+  await mkdir(join(context.project, "nested"));
+  await writeFile(join(context.project, "nested", "AGENTS.md"), "nested instructions\n");
+  await writeFile(join(context.project, "nested", "file.txt"), "old\n");
+  const opened = await callOpen(context.client, context.project, "chat-nested-context");
+  const workspaceId = String(structuredContent(opened).workspaceId);
+  const patch = [
+    "*** Begin Patch",
+    "*** Update File: nested/file.txt",
+    "@@",
+    "-old",
+    "+new",
+    "*** End Patch",
+  ].join("\n");
+
+  const blocked = await context.client.callTool({
+    name: "apply_patch",
+    arguments: { workspaceId, patch },
+  });
+  assert.equal(blocked.isError, true);
+  assert.match(responseText(blocked), /read the applicable instruction file/i);
+  assert.match(responseText(blocked), /nested\/AGENTS\.md/);
+  const blockedCommand = await context.client.callTool({
+    name: "exec_command",
+    arguments: {
+      workspaceId,
+      cmd: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
+      workingDirectory: "nested",
+      yieldTimeMs: 2_000,
+    },
+  });
+  assert.equal(blockedCommand.isError, true);
+  assert.match(responseText(blockedCommand), /nested\/AGENTS\.md/);
+
+  const partial = await context.client.callTool({
+    name: "read",
+    arguments: { workspaceId, path: "nested/AGENTS.md", limit: 1 },
+  });
+  assert.match(String(structuredContent(partial).result), /only read partially and is not active yet/i);
+  const stillBlocked = await context.client.callTool({
+    name: "apply_patch",
+    arguments: { workspaceId, patch },
+  });
+  assert.equal(stillBlocked.isError, true);
+
+  const complete = await context.client.callTool({
+    name: "read",
+    arguments: { workspaceId, path: "nested/AGENTS.md" },
+  });
+  assert.doesNotMatch(String(structuredContent(complete).result), /not active yet/i);
+  const applied = await context.client.callTool({
+    name: "apply_patch",
+    arguments: { workspaceId, patch },
+  });
+  assert.notEqual(applied.isError, true);
+  assert.equal(await readFile(join(context.project, "nested", "file.txt"), "utf8"), "new\n");
+});
+
+test("process tools rediscover, terminate, and retain workspace-owned sessions", async (t) => {
+  const context = await fixture(t);
+  const opened = await callOpen(context.client, context.project, "chat-processes");
+  const workspaceId = String(structuredContent(opened).workspaceId);
+  const node = JSON.stringify(process.execPath);
+
+  const foreground = await context.client.callTool({
+    name: "exec_command",
+    arguments: { workspaceId, cmd: `${node} -e "process.exit(0)"`, yieldTimeMs: 2_000 },
+  });
+  assert.equal(structuredContent(foreground).running, false);
+  assert.equal(typeof structuredContent(foreground).sessionId, "number");
+
+  const background = await context.client.callTool({
+    name: "exec_command",
+    arguments: {
+      workspaceId,
+      cmd: `${node} -e "setInterval(() => {}, 1000)"`,
+      yieldTimeMs: 5,
+    },
+  });
+  assert.equal(structuredContent(background).running, true);
+  const sessionId = Number(structuredContent(background).sessionId);
+
+  const listed = await context.client.callTool({
+    name: "list_processes",
+    arguments: { workspaceId },
+  });
+  const processes = structuredContent(listed).processes as Array<Record<string, unknown>>;
+  assert.equal(processes.some((process) =>
+    process.sessionId === sessionId && process.running === true), true);
+  assert.equal(processes.some((process) =>
+    process.sessionId === structuredContent(foreground).sessionId
+    && process.running === false), true);
+
+  const termination = await context.client.callTool({
+    name: "terminate_process",
+    arguments: { workspaceId, sessionId },
+  });
+  assert.match(responseText(termination), /termination requested/i);
+  const completed = await context.client.callTool({
+    name: "write_stdin",
+    arguments: { workspaceId, sessionId, yieldTimeMs: 2_000 },
+  });
+  assert.equal(structuredContent(completed).running, false);
+
+  const repeated = await context.client.callTool({
+    name: "terminate_process",
+    arguments: { workspaceId, sessionId },
+  });
+  assert.equal(structuredContent(repeated).running, false);
+  assert.match(responseText(repeated), /already completed/i);
+});
+
+test("stale context blocks process input but still permits polling and Ctrl-C", async (t) => {
+  const context = await fixture(t);
+  const opened = await callOpen(context.client, context.project, "chat-stale-process");
+  const workspaceId = String(structuredContent(opened).workspaceId);
+  const running = await context.client.callTool({
+    name: "exec_command",
+    arguments: {
+      workspaceId,
+      cmd: `${JSON.stringify(process.execPath)} -e "process.stdin.resume(); setInterval(() => {}, 1000)"`,
+      yieldTimeMs: 5,
+    },
+  });
+  const sessionId = Number(structuredContent(running).sessionId);
+  assert.equal(structuredContent(running).running, true);
+
+  await writeFile(join(context.project, "AGENTS.md"), "stale while running\n");
+  const polled = await context.client.callTool({
+    name: "write_stdin",
+    arguments: { workspaceId, sessionId, yieldTimeMs: 1 },
+  });
+  assert.notEqual(polled.isError, true);
+  assert.equal(structuredContent(polled).running, true);
+
+  const blockedInput = await context.client.callTool({
+    name: "write_stdin",
+    arguments: { workspaceId, sessionId, chars: "unsafe input\n", yieldTimeMs: 1 },
+  });
+  assert.equal(blockedInput.isError, true);
+  assert.match(responseText(blockedInput), /workspace context is stale/i);
+
+  const interrupted = await context.client.callTool({
+    name: "write_stdin",
+    arguments: { workspaceId, sessionId, chars: "\u0003", yieldTimeMs: 2_000 },
+  });
+  assert.notEqual(interrupted.isError, true);
+  assert.equal(structuredContent(interrupted).running, false);
+});
+
 test("changes widget mode keeps ordinary tools data-only and reserves UI for checkpoints", async (t) => {
-  const context = await fixture(t, { git: true, toolMode: "native", widgets: "changes" });
+  const context = await fixture(t, { git: true, widgets: "changes" });
   const tools = await context.client.listTools();
   const openWorkspace = tools.tools.find((tool) => tool.name === "open_workspace");
+  const refreshContext = tools.tools.find((tool) => tool.name === "refresh_workspace_context");
   const read = tools.tools.find((tool) => tool.name === "read");
   const execCommand = tools.tools.find((tool) => tool.name === "exec_command");
   const showChanges = tools.tools.find((tool) => tool.name === "show_changes");
 
   assert.ok(widgetResourceUri(openWorkspace));
+  assert.ok(widgetResourceUri(refreshContext));
   assert.ok(widgetResourceUri(showChanges));
   assert.equal(widgetResourceUri(read), undefined);
   assert.equal(widgetResourceUri(execCommand), undefined);
@@ -240,7 +462,7 @@ test("changes widget mode keeps ordinary tools data-only and reserves UI for che
 });
 
 test("configured file sharing exposes share_file and instructs the host to use returned URLs", async (t) => {
-  const context = await fixture(t, { toolMode: "native", fileShare: true });
+  const context = await fixture(t, { fileShare: true });
   const tools = await context.client.listTools();
   const shareFile = tools.tools.find((tool) => tool.name === "share_file");
   const openWorkspace = tools.tools.find((tool) => tool.name === "open_workspace");
@@ -280,7 +502,6 @@ async function fixture(
   t: TestContext,
   options: {
     git?: boolean;
-    toolMode?: "minimal" | "full" | "native";
     widgets?: "off" | "changes" | "full";
     fileShare?: boolean;
   } = {},
@@ -310,7 +531,6 @@ async function fixture(
     DEVSPACE_WORKTREE_ROOT: join(root, ".worktrees"),
     DEVSPACE_AGENT_DIR: agentDir,
     DEVSPACE_WIDGETS: options.widgets ?? "full",
-    DEVSPACE_TOOL_MODE: options.toolMode ?? "full",
     ...(options.fileShare
       ? {
           DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer",

@@ -1,8 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import { openDatabase, type DatabaseHandle } from "./db/client.js";
 import {
+  activatedSkills,
+  loadedAgentFiles,
   workspaceConversationBindings,
+  workspaceContextStates,
   workspaceSessions,
+  type ActivatedSkillRow,
+  type LoadedAgentFileRow,
+  type WorkspaceContextStateRow,
   type WorkspaceConversationBindingRow,
   type WorkspaceSessionRow,
 } from "./db/schema.js";
@@ -30,6 +36,30 @@ export interface WorkspaceConversationBinding {
   lastUsedAt: string;
 }
 
+export interface StoredAgentFile {
+  path: string;
+  contentHash: string;
+  content: string;
+  loadedAt: string;
+  lastSeenAt: string;
+}
+
+export interface StoredActivatedSkill {
+  path: string;
+  baseDir: string;
+  contentHash: string;
+  content: string;
+  activatedAt: string;
+  lastSeenAt: string;
+}
+
+export interface StoredWorkspaceContextState {
+  revision: string;
+  availableAgentFiles: string[];
+  skills: Array<{ name: string; description: string; path: string }>;
+  refreshedAt: string;
+}
+
 export interface WorkspaceStore {
   createSession(input: {
     id: string;
@@ -53,6 +83,17 @@ export interface WorkspaceStore {
   }): WorkspaceConversationBinding;
   touchConversationBinding(conversationScopeId: string, targetKey: string): void;
   deleteConversationBinding(conversationScopeId: string, targetKey: string): void;
+  getLoadedAgentFiles(workspaceSessionId: string): StoredAgentFile[];
+  getActivatedSkills(workspaceSessionId: string): StoredActivatedSkill[];
+  getContextState(workspaceSessionId: string): StoredWorkspaceContextState | undefined;
+  replaceWorkspaceContext(
+    workspaceSessionId: string,
+    context: {
+      files: StoredAgentFile[];
+      activatedSkills: StoredActivatedSkill[];
+      state: StoredWorkspaceContextState;
+    },
+  ): void;
   close?(): void;
 }
 
@@ -201,6 +242,91 @@ export class SqliteWorkspaceStore implements WorkspaceStore {
       .run();
   }
 
+  getLoadedAgentFiles(workspaceSessionId: string): StoredAgentFile[] {
+    return this.database.db
+      .select()
+      .from(loadedAgentFiles)
+      .where(eq(loadedAgentFiles.workspaceSessionId, workspaceSessionId))
+      .all()
+      .map(rowToStoredAgentFile);
+  }
+
+  getActivatedSkills(workspaceSessionId: string): StoredActivatedSkill[] {
+    return this.database.db
+      .select()
+      .from(activatedSkills)
+      .where(eq(activatedSkills.workspaceSessionId, workspaceSessionId))
+      .all()
+      .map(rowToStoredActivatedSkill);
+  }
+
+  getContextState(workspaceSessionId: string): StoredWorkspaceContextState | undefined {
+    const row = this.database.db
+      .select()
+      .from(workspaceContextStates)
+      .where(eq(workspaceContextStates.workspaceSessionId, workspaceSessionId))
+      .get();
+    return row ? rowToStoredWorkspaceContextState(row) : undefined;
+  }
+
+  replaceWorkspaceContext(
+    workspaceSessionId: string,
+    context: {
+      files: StoredAgentFile[];
+      activatedSkills: StoredActivatedSkill[];
+      state: StoredWorkspaceContextState;
+    },
+  ): void {
+    this.database.sqlite.transaction(() => {
+      this.database.db
+        .delete(loadedAgentFiles)
+        .where(eq(loadedAgentFiles.workspaceSessionId, workspaceSessionId))
+        .run();
+      for (const file of context.files) {
+        this.database.db.insert(loadedAgentFiles).values({
+          workspaceSessionId,
+          path: file.path,
+          contentHash: file.contentHash,
+          content: file.content,
+          loadedAt: file.loadedAt,
+          lastSeenAt: file.lastSeenAt,
+        }).run();
+      }
+
+      this.database.db
+        .delete(activatedSkills)
+        .where(eq(activatedSkills.workspaceSessionId, workspaceSessionId))
+        .run();
+      for (const skill of context.activatedSkills) {
+        this.database.db.insert(activatedSkills).values({
+          workspaceSessionId,
+          path: skill.path,
+          baseDir: skill.baseDir,
+          contentHash: skill.contentHash,
+          content: skill.content,
+          activatedAt: skill.activatedAt,
+          lastSeenAt: skill.lastSeenAt,
+        }).run();
+      }
+
+      this.database.db.insert(workspaceContextStates).values({
+        workspaceSessionId,
+        revision: context.state.revision,
+        availableAgentFilesJson: JSON.stringify(context.state.availableAgentFiles),
+        skillsJson: JSON.stringify(context.state.skills),
+        refreshedAt: context.state.refreshedAt,
+      }).onConflictDoUpdate({
+        target: workspaceContextStates.workspaceSessionId,
+        set: {
+          revision: context.state.revision,
+          availableAgentFilesJson: JSON.stringify(context.state.availableAgentFiles),
+          skillsJson: JSON.stringify(context.state.skills),
+          refreshedAt: context.state.refreshedAt,
+        },
+      }).run();
+    })();
+  }
+
   close(): void {
     this.database.close();
   }
@@ -236,4 +362,45 @@ function rowToWorkspaceConversationBinding(
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
   };
+}
+
+function rowToStoredAgentFile(row: LoadedAgentFileRow): StoredAgentFile {
+  return {
+    path: row.path,
+    contentHash: row.contentHash,
+    content: row.content,
+    loadedAt: row.loadedAt,
+    lastSeenAt: row.lastSeenAt,
+  };
+}
+
+function rowToStoredActivatedSkill(row: ActivatedSkillRow): StoredActivatedSkill {
+  return {
+    path: row.path,
+    baseDir: row.baseDir,
+    contentHash: row.contentHash,
+    content: row.content,
+    activatedAt: row.activatedAt,
+    lastSeenAt: row.lastSeenAt,
+  };
+}
+
+function rowToStoredWorkspaceContextState(
+  row: WorkspaceContextStateRow,
+): StoredWorkspaceContextState {
+  return {
+    revision: row.revision,
+    availableAgentFiles: parseJsonArray(row.availableAgentFilesJson),
+    skills: parseJsonArray(row.skillsJson),
+    refreshedAt: row.refreshedAt,
+  };
+}
+
+function parseJsonArray<T>(value: string): T[] {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as T[] : [];
+  } catch {
+    return [];
+  }
 }

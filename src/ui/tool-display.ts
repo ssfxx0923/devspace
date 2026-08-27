@@ -1,9 +1,8 @@
 import {
-  isEditTool,
   isPatchTool,
   isReviewTool,
   isShellTool,
-  isWriteTool,
+  isWorkspaceTool,
   summaryNumber,
   type ToolResultCard,
 } from "./card-types.js";
@@ -35,26 +34,19 @@ export function getToolDisplay(card: ToolResultCard): ToolDisplay {
         label: card.root ?? card.path,
         tone: "workspace",
       };
+    case "refresh_workspace_context":
+      return {
+        icon: toolIcons.instructions,
+        title: "Refreshed workspace context",
+        label: card.root ?? card.path,
+        tone: "workspace",
+      };
     case "read":
       return {
         icon: toolIcons.readFile,
         title: "Read file",
         label: card.path,
         tone: "read",
-      };
-    case "write":
-      return {
-        icon: toolIcons.writeFile,
-        title: "Wrote file",
-        label: card.path,
-        tone: "write",
-      };
-    case "edit":
-      return {
-        icon: toolIcons.editFile,
-        title: "Edited file",
-        label: card.path,
-        tone: "edit",
       };
     case "apply_patch": {
       const display = getPatchDisplayParts(card);
@@ -87,7 +79,6 @@ export function getToolDisplay(card: ToolResultCard): ToolDisplay {
         label: card.path,
         tone: "directory",
       };
-    case "bash":
     case "exec_command":
       return {
         icon: toolIcons.terminalSquare,
@@ -103,6 +94,22 @@ export function getToolDisplay(card: ToolResultCard): ToolDisplay {
         label: processLabel(card),
         tone: "shell",
         state: processState(card),
+      };
+    case "list_processes":
+      return {
+        icon: toolIcons.terminalSquare,
+        title: "Listed processes",
+        label: card.path,
+        tone: "shell",
+      };
+    case "terminate_process":
+      return {
+        icon: toolIcons.terminal,
+        title: card.summary?.running === true
+          ? "Termination requested"
+          : "Process already finished",
+        label: processLabel(card),
+        tone: "shell",
       };
     case "show_changes": {
       const display = getPatchDisplayParts(card, { emptyTitle: "Changes ready" });
@@ -122,7 +129,7 @@ export function getToolDisplay(card: ToolResultCard): ToolDisplay {
 export function getToolHeaderSummary(card: ToolResultCard): ToolHeaderSummary {
   const summary = card.summary ?? {};
 
-  if (isReviewTool(card.tool) || isPatchTool(card.tool) || isEditTool(card.tool) || isWriteTool(card.tool)) {
+  if (isReviewTool(card.tool) || isPatchTool(card.tool)) {
     return {
       kind: "diff",
       additions: summaryNumber(summary, "additions") ?? 0,
@@ -130,12 +137,19 @@ export function getToolHeaderSummary(card: ToolResultCard): ToolHeaderSummary {
     };
   }
 
-  if (card.tool === "open_workspace") {
+  if (isWorkspaceTool(card.tool)) {
     const parts = [
       countLabel(summaryNumber(summary, "agentsFiles"), "instruction"),
       countLabel(summaryNumber(summary, "skills"), "skill"),
     ].filter((part): part is string => Boolean(part));
     return parts.length > 0 ? { kind: "text", text: parts.join(" · ") } : { kind: "empty" };
+  }
+
+  if (card.tool === "list_processes") {
+    const processCount = summaryNumber(summary, "processes");
+    return processCount === undefined
+      ? { kind: "empty" }
+      : { kind: "text", text: `${processCount} ${processCount === 1 ? "process" : "processes"}` };
   }
 
   if (isShellTool(card.tool)) {

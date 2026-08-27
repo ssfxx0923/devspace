@@ -26,7 +26,7 @@ These ideas should stay true as the project evolves:
 - **Allowed root** — a configured filesystem boundary within which a workspace may be opened. It is not itself necessarily a workspace.
 - **Checkout mode** — operating on an existing checkout supplied by the user.
 - **Worktree mode** — operating in an isolated Git worktree.
-- **Tool surface** — the tools exposed by a configured mode, such as native, minimal, or full.
+- **Tool surface** — the native coding tools exposed by the server.
 - **Process session** — a long-running command tracked for later input, output, or termination.
 - **Instruction file** — an `AGENTS.md` or `CLAUDE.md` discovered while navigating a workspace.
 - **Artifact** — an output surfaced for the host or user to inspect.
@@ -60,7 +60,7 @@ Determine how the user will consume the change and verify that path. Behavior ma
 - a fresh process and a server or host that needs restarting;
 - checkout mode and worktree mode;
 - Linux, macOS, and Windows Bash environments;
-- native, minimal, and full tool surfaces;
+- the native tool surface;
 - widgets enabled, disabled, or limited to change review.
 
 State clearly when only a narrower proxy was verified. For model-facing schemas, inspect what the host receives. For UI and artifacts, inspect the rendered result rather than inferring success from the producing command.

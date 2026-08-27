@@ -1,6 +1,9 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { Stats } from "node:fs";
 import type {
+  StoredActivatedSkill,
+  StoredAgentFile,
+  StoredWorkspaceContextState,
   WorkspaceConversationBinding,
   WorkspaceMode,
   WorkspaceStore,
@@ -61,6 +64,57 @@ export interface WorkspaceContext {
   includeBootstrapContext: boolean;
 }
 
+export type WorkspaceContextChangeKind = "added" | "modified" | "deleted";
+export type WorkspaceContextItemKind = "instruction" | "skill";
+
+export interface WorkspaceContextChange {
+  path: string;
+  kind: WorkspaceContextChangeKind;
+  contextKind: WorkspaceContextItemKind;
+  active: boolean;
+}
+
+export interface WorkspaceContextSnapshot {
+  workspace: Workspace;
+  contextRevision: string;
+  refreshedAt: string;
+  agentsFiles: LoadedAgentsFile[];
+  availableAgentsFiles: AvailableAgentsFile[];
+  skills: Array<{
+    name: string;
+    description: string;
+    path: string;
+    activated: boolean;
+    content?: string;
+  }>;
+  changes: WorkspaceContextChange[];
+}
+
+interface AcceptedWorkspaceContext {
+  files: StoredAgentFile[];
+  activatedSkills: StoredActivatedSkill[];
+  state: StoredWorkspaceContextState;
+}
+
+export class WorkspaceContextStaleError extends Error {
+  constructor(public readonly paths: string[]) {
+    super(
+      `Workspace context is stale because active instructions or skills changed: ${paths.join(", ")}. `
+        + "Call refresh_workspace_context, review the returned context, and retry.",
+    );
+    this.name = "WorkspaceContextStaleError";
+  }
+}
+
+export class UnreadWorkspaceInstructionError extends Error {
+  constructor(public readonly paths: string[]) {
+    super(
+      `Read the applicable instruction ${paths.length === 1 ? "file" : "files"} in full before modifying this path: ${paths.join(", ")}.`,
+    );
+    this.name = "UnreadWorkspaceInstructionError";
+  }
+}
+
 export interface WorkspaceReadPath {
   absolutePath: string;
   readRoots: string[];
@@ -85,6 +139,7 @@ type DirectoryOps = {
 export class WorkspaceRegistry {
   private readonly workspaces = new Map<string, Workspace>();
   private readonly pendingCheckoutOpens = new Map<string, Promise<WorkspaceContext>>();
+  private readonly acceptedContexts = new Map<string, AcceptedWorkspaceContext>();
 
   constructor(
     private readonly config: ServerConfig,
@@ -265,8 +320,11 @@ export class WorkspaceRegistry {
             }
           : undefined,
       ...this.loadSkillsForWorkspace(root),
-      activatedSkillDirs: new Set(),
+      activatedSkillDirs: new Set(
+        this.store?.getActivatedSkills(workspaceId).map((skill) => skill.baseDir) ?? [],
+      ),
     };
+    this.loadAcceptedContext(restoredWorkspace.id);
     this.store?.touchSession(workspaceId);
     this.workspaces.set(restoredWorkspace.id, restoredWorkspace);
 
@@ -304,10 +362,205 @@ export class WorkspaceRegistry {
     }
   }
 
-  markReadPathLoaded(workspace: Workspace, readPath: WorkspaceReadPath): void {
-    if (readPath.skillRead?.isSkillFile) {
-      markSkillActivated(workspace.activatedSkillDirs, readPath.skillRead.skill);
+  async markReadPathLoaded(
+    workspace: Workspace,
+    readPath: WorkspaceReadPath,
+    complete: boolean,
+  ): Promise<{ requiresFullRead: boolean }> {
+    const isInstruction = isWorkspaceInstructionPath(readPath.absolutePath, workspace.root);
+    const isSkillFile = readPath.skillRead?.isSkillFile === true;
+    if ((!isInstruction && !isSkillFile) || !complete) {
+      return { requiresFullRead: (isInstruction || isSkillFile) && !complete };
     }
+
+    const accepted = this.acceptedContext(workspace.id);
+    if (!accepted) return { requiresFullRead: true };
+
+    const previousFiles = accepted.files;
+    const previouslyActivated = readPath.skillRead
+      ? workspace.activatedSkillDirs.has(resolve(readPath.skillRead.skill.baseDir))
+      : false;
+    if (isSkillFile && readPath.skillRead) {
+      markSkillActivated(workspace.activatedSkillDirs, readPath.skillRead.skill);
+    } else if (isInstruction) {
+      const content = await readFile(readPath.absolutePath, "utf8");
+      const now = new Date().toISOString();
+      const existing = accepted.files.find((file) => file.path === readPath.absolutePath);
+      accepted.files = [
+        ...accepted.files.filter((file) => file.path !== readPath.absolutePath),
+        {
+          path: readPath.absolutePath,
+          content,
+          contentHash: contentHash(content),
+          loadedAt: existing?.loadedAt ?? now,
+          lastSeenAt: now,
+        },
+      ];
+    }
+
+    try {
+      await this.refreshWorkspaceContext(workspace.id);
+    } catch (error) {
+      accepted.files = previousFiles;
+      if (readPath.skillRead && !previouslyActivated) {
+        workspace.activatedSkillDirs.delete(resolve(readPath.skillRead.skill.baseDir));
+      }
+      throw error;
+    }
+    return { requiresFullRead: false };
+  }
+
+  async initializeWorkspaceContext(context: WorkspaceContext): Promise<void> {
+    const now = new Date().toISOString();
+    const files = context.agentsFiles.map((file) => storedAgentFile(file, now));
+    const available = context.availableAgentsFiles.map((file) => resolve(file.path));
+    const skills = skillMetadata(context.workspace);
+    const state: StoredWorkspaceContextState = {
+      revision: contextRevision(files, [], available, skills),
+      availableAgentFiles: available,
+      skills,
+      refreshedAt: now,
+    };
+    const accepted = { files, activatedSkills: [], state };
+    this.persistAcceptedContext(context.workspace.id, accepted);
+    this.acceptedContexts.set(context.workspace.id, accepted);
+  }
+
+  async refreshWorkspaceContext(workspaceId: string): Promise<WorkspaceContextSnapshot> {
+    const workspace = this.getWorkspace(workspaceId);
+    const previous = this.acceptedContext(workspace.id);
+    const previousSkills = workspace.skills;
+    const previousSkillDiagnostics = workspace.skillDiagnostics;
+    const previousActivatedSkillDirs = workspace.activatedSkillDirs;
+    const now = new Date().toISOString();
+    const loadedSkills = this.loadSkillsForWorkspace(workspace.root);
+    workspace.skills = loadedSkills.skills;
+    workspace.skillDiagnostics = loadedSkills.skillDiagnostics;
+    const initialFiles = await this.loadInitialAgentsFiles(workspace.root);
+    const initialPaths = new Set(initialFiles.map((file) => resolve(file.path)));
+    const files = initialFiles.map((file) => {
+      const existing = previous?.files.find((stored) => stored.path === resolve(file.path));
+      return storedAgentFile(file, now, existing?.loadedAt);
+    });
+
+    for (const stored of previous?.files ?? []) {
+      if (initialPaths.has(stored.path)) continue;
+      const current = await readWorkspaceInstruction(stored.path, workspace.root);
+      if (!current) continue;
+      files.push({
+        path: stored.path,
+        content: current,
+        contentHash: contentHash(current),
+        loadedAt: stored.loadedAt,
+        lastSeenAt: now,
+      });
+    }
+
+    const activatedPaths = new Set([
+      ...(previous?.activatedSkills.map((skill) => skill.path) ?? []),
+      ...workspace.skills
+        .filter((skill) => workspace.activatedSkillDirs.has(resolve(skill.baseDir)))
+        .map((skill) => resolve(skill.filePath)),
+    ]);
+    const activatedSkills: StoredActivatedSkill[] = [];
+    for (const skill of workspace.skills) {
+      const path = resolve(skill.filePath);
+      if (!activatedPaths.has(path)) continue;
+      const content = await tryReadFile(path);
+      if (content === undefined) continue;
+      const existing = previous?.activatedSkills.find((stored) => stored.path === path);
+      activatedSkills.push({
+        path,
+        baseDir: resolve(skill.baseDir),
+        content,
+        contentHash: contentHash(content),
+        activatedAt: existing?.activatedAt ?? now,
+        lastSeenAt: now,
+      });
+    }
+    workspace.activatedSkillDirs = new Set(activatedSkills.map((skill) => skill.baseDir));
+
+    const loadedFiles = files.map((file) => ({ path: file.path, content: file.content }));
+    const availableAgentsFiles = await this.findAvailableAgentsFiles(workspace.root, loadedFiles);
+    const available = availableAgentsFiles.map((file) => resolve(file.path));
+    const skills = skillMetadata(workspace);
+    const changes = contextChanges(previous, files, activatedSkills, available, skills);
+    const state: StoredWorkspaceContextState = {
+      revision: contextRevision(files, activatedSkills, available, skills),
+      availableAgentFiles: available,
+      skills,
+      refreshedAt: now,
+    };
+    const accepted = { files, activatedSkills, state };
+    try {
+      this.persistAcceptedContext(workspace.id, accepted);
+    } catch (error) {
+      workspace.skills = previousSkills;
+      workspace.skillDiagnostics = previousSkillDiagnostics;
+      workspace.activatedSkillDirs = previousActivatedSkillDirs;
+      throw error;
+    }
+    this.acceptedContexts.set(workspace.id, accepted);
+
+    return {
+      workspace,
+      contextRevision: state.revision,
+      refreshedAt: now,
+      agentsFiles: loadedFiles,
+      availableAgentsFiles,
+      skills: workspace.skills.filter((skill) => !skill.disableModelInvocation).map((skill) => {
+        const activated = activatedSkills.find((stored) => stored.path === resolve(skill.filePath));
+        return {
+          name: skill.name,
+          description: skill.description,
+          path: resolve(skill.filePath),
+          activated: activated !== undefined,
+          content: activated?.content,
+        };
+      }),
+      changes,
+    };
+  }
+
+  async assertWorkspaceContextCurrent(
+    workspace: Workspace,
+    targetPaths: string[] = [],
+  ): Promise<void> {
+    const accepted = this.acceptedContext(workspace.id);
+    if (!accepted) throw new WorkspaceContextStaleError(["context baseline missing"]);
+
+    const changed = new Set<string>();
+    const currentInitial = await this.loadInitialAgentsFiles(workspace.root);
+    const acceptedInitial = accepted.files.filter((file) =>
+      isInitialAgentsFilePath(file.path, workspace.root, this.config.agentDir));
+    compareFileSets(acceptedInitial, currentInitial, changed);
+
+    for (const file of accepted.files) {
+      if (acceptedInitial.some((initial) => initial.path === file.path)) continue;
+      const current = await readWorkspaceInstruction(file.path, workspace.root);
+      if (current === undefined || contentHash(current) !== file.contentHash) changed.add(file.path);
+    }
+    for (const skill of accepted.activatedSkills) {
+      const current = await tryReadFile(skill.path);
+      if (current === undefined || contentHash(current) !== skill.contentHash) changed.add(skill.path);
+    }
+    if (changed.size > 0) {
+      throw new WorkspaceContextStaleError([...changed].map((path) => formatAgentsPath(path, workspace.root)));
+    }
+
+    if (targetPaths.length === 0) return;
+    const activeFiles = accepted.files.map((file) => ({ path: file.path, content: file.content }));
+    const available = await this.findAvailableAgentsFiles(workspace.root, activeFiles);
+    const unread = available
+      .map((file) => resolve(file.path))
+      .filter((instruction) => targetPaths.some((target) =>
+        isPathInsideRoot(resolve(target), dirname(instruction))))
+      .map((path) => formatAgentsPath(path, workspace.root));
+    if (unread.length > 0) throw new UnreadWorkspaceInstructionError(unread);
+  }
+
+  contextState(workspaceId: string): StoredWorkspaceContextState | undefined {
+    return this.acceptedContext(workspaceId)?.state;
   }
 
   resolveWorkingDirectory(workspace: Workspace, workingDirectory: string | undefined): string {
@@ -368,14 +621,15 @@ export class WorkspaceRegistry {
     this.workspaces.set(workspace.id, workspace);
     const agentsFiles = await this.loadInitialAgentsFiles(workspace.root);
     const availableAgentsFiles = await this.findAvailableAgentsFiles(workspace.root, agentsFiles);
-
-    return {
+    const context = {
       workspace,
       agentsFiles,
       availableAgentsFiles,
       workspaceReused: false,
       includeBootstrapContext: true,
     };
+    await this.initializeWorkspaceContext(context);
+    return context;
   }
 
   private loadSkillsForWorkspace(root: string): Pick<Workspace, "skills" | "skillDiagnostics"> {
@@ -447,6 +701,176 @@ export class WorkspaceRegistry {
     });
 
     return discovered.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  private acceptedContext(workspaceId: string): AcceptedWorkspaceContext | undefined {
+    return this.acceptedContexts.get(workspaceId) ?? this.loadAcceptedContext(workspaceId);
+  }
+
+  private loadAcceptedContext(workspaceId: string): AcceptedWorkspaceContext | undefined {
+    const state = this.store?.getContextState(workspaceId);
+    if (!state) return undefined;
+    const accepted = {
+      files: this.store?.getLoadedAgentFiles(workspaceId) ?? [],
+      activatedSkills: this.store?.getActivatedSkills(workspaceId) ?? [],
+      state,
+    };
+    this.acceptedContexts.set(workspaceId, accepted);
+    return accepted;
+  }
+
+  private persistAcceptedContext(workspaceId: string, context: AcceptedWorkspaceContext): void {
+    this.store?.replaceWorkspaceContext(workspaceId, context);
+  }
+}
+
+function contentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function storedAgentFile(
+  file: LoadedAgentsFile,
+  now: string,
+  loadedAt = now,
+): StoredAgentFile {
+  return {
+    path: resolve(file.path),
+    content: file.content,
+    contentHash: contentHash(file.content),
+    loadedAt,
+    lastSeenAt: now,
+  };
+}
+
+function skillMetadata(
+  workspace: Workspace,
+): Array<{ name: string; description: string; path: string }> {
+  return workspace.skills.filter((skill) => !skill.disableModelInvocation).map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+    path: resolve(skill.filePath),
+  })).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function contextRevision(
+  files: StoredAgentFile[],
+  activatedSkills: StoredActivatedSkill[],
+  available: string[],
+  skills: Array<{ name: string; description: string; path: string }>,
+): string {
+  const payload = {
+    files: files.map((file) => [file.path, file.contentHash]).sort(),
+    activatedSkills: activatedSkills.map((skill) => [skill.path, skill.contentHash]).sort(),
+    available: [...available].sort(),
+    skills,
+  };
+  return `ctx_${createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 20)}`;
+}
+
+function contextChanges(
+  previous: AcceptedWorkspaceContext | undefined,
+  files: StoredAgentFile[],
+  activatedSkills: StoredActivatedSkill[],
+  available: string[],
+  skills: Array<{ name: string; description: string; path: string }>,
+): WorkspaceContextChange[] {
+  const changes: WorkspaceContextChange[] = [];
+  compareContextItems(
+    previous?.files ?? [],
+    files,
+    "instruction",
+    true,
+    changes,
+    (item) => item.contentHash,
+  );
+  compareContextItems(
+    previous?.activatedSkills ?? [],
+    activatedSkills,
+    "skill",
+    true,
+    changes,
+    (item) => item.contentHash,
+  );
+  compareContextItems(
+    (previous?.state.availableAgentFiles ?? []).map((path) => ({ path })),
+    available.map((path) => ({ path })),
+    "instruction",
+    false,
+    changes,
+    () => "",
+  );
+  compareContextItems(
+    previous?.state.skills ?? [],
+    skills,
+    "skill",
+    false,
+    changes,
+    (item) => JSON.stringify(item),
+  );
+  return changes.sort((a, b) => a.path.localeCompare(b.path) || a.kind.localeCompare(b.kind));
+}
+
+function compareContextItems<T extends { path: string }>(
+  previous: T[],
+  current: T[],
+  contextKind: WorkspaceContextItemKind,
+  active: boolean,
+  changes: WorkspaceContextChange[],
+  fingerprint: (item: T) => string,
+): void {
+  const previousByPath = new Map(previous.map((item) => [item.path, item]));
+  const currentByPath = new Map(current.map((item) => [item.path, item]));
+  for (const [path, item] of currentByPath) {
+    const old = previousByPath.get(path);
+    if (!old) changes.push({ path, kind: "added", contextKind, active });
+    else if (fingerprint(old) !== fingerprint(item)) {
+      changes.push({ path, kind: "modified", contextKind, active });
+    }
+  }
+  for (const path of previousByPath.keys()) {
+    if (!currentByPath.has(path)) changes.push({ path, kind: "deleted", contextKind, active });
+  }
+}
+
+function compareFileSets(
+  accepted: StoredAgentFile[],
+  current: LoadedAgentsFile[],
+  changed: Set<string>,
+): void {
+  const acceptedByPath = new Map(accepted.map((file) => [resolve(file.path), file]));
+  const currentByPath = new Map(current.map((file) => [resolve(file.path), file]));
+  for (const [path, file] of currentByPath) {
+    const stored = acceptedByPath.get(path);
+    if (!stored || contentHash(file.content) !== stored.contentHash) changed.add(path);
+  }
+  for (const path of acceptedByPath.keys()) {
+    if (!currentByPath.has(path)) changed.add(path);
+  }
+}
+
+function isWorkspaceInstructionPath(path: string, root: string): boolean {
+  const absolute = resolve(path);
+  return isPathInsideRoot(absolute, root)
+    && dirname(absolute) !== resolve(root)
+    && CONTEXT_FILE_NAMES.has(basename(absolute));
+}
+
+async function readWorkspaceInstruction(path: string, root: string): Promise<string | undefined> {
+  if (!CONTEXT_FILE_NAMES.has(basename(path))) return undefined;
+  try {
+    const resolvedPath = await realpath(path);
+    if (!isPathInsideRoot(resolvedPath, root)) return undefined;
+    return await readFile(resolvedPath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function tryReadFile(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return undefined;
   }
 }
 

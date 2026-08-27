@@ -8,9 +8,8 @@ const displayCases: Array<[ToolResultCard, { title: string; tone: string }]> = [
   [{ tool: "open_workspace", root: "/tmp/project", workspaceReused: true }, { title: "Reused workspace", tone: "workspace" }],
   [{ tool: "open_workspace", root: "/tmp/project", mode: "worktree" }, { title: "Opened workspace", tone: "workspace" }],
   [{ tool: "open_workspace", root: "/tmp/project", mode: "worktree", workspaceReused: true }, { title: "Reused workspace", tone: "workspace" }],
+  [{ tool: "refresh_workspace_context", root: "/tmp/project" }, { title: "Refreshed workspace context", tone: "workspace" }],
   [{ tool: "read", path: "src/read.ts" }, { title: "Read file", tone: "read" }],
-  [{ tool: "write", path: "src/write.ts" }, { title: "Wrote file", tone: "write" }],
-  [{ tool: "edit", path: "src/edit.ts" }, { title: "Edited file", tone: "edit" }],
   [{
     tool: "apply_patch",
     files: [{ path: "src/new.ts", operation: "add" }],
@@ -20,7 +19,8 @@ const displayCases: Array<[ToolResultCard, { title: string; tone: string }]> = [
     summary: { pattern: "needle", scope: "src" },
   }, { title: "Searched files", tone: "search" }],
   [{ tool: "ls", path: "src" }, { title: "Listed directory", tone: "directory" }],
-  [{ tool: "bash", summary: { command: "npm test", exitCode: 0 } }, { title: "Ran command", tone: "shell" }],
+  [{ tool: "list_processes", summary: { processes: 2 } }, { title: "Listed processes", tone: "shell" }],
+  [{ tool: "terminate_process", summary: { sessionId: 123, running: true } }, { title: "Termination requested", tone: "shell" }],
 ];
 
 for (const [card, expected] of displayCases) {
@@ -31,6 +31,10 @@ assert.equal(getToolDisplay({ tool: "open_workspace", root: "/tmp/project" }).la
 assert.equal(
   getToolDisplay({ tool: "open_workspace", root: "/tmp/project" }).icon,
   toolIcons.folderOpen,
+);
+assert.equal(
+  getToolDisplay({ tool: "terminate_process", summary: { sessionId: 123, running: false } }).title,
+  "Process already finished",
 );
 assert.equal(
   getToolDisplay({ tool: "open_workspace", root: "/tmp/project", mode: "worktree" }).icon,
@@ -169,6 +173,11 @@ assert.deepEqual(
 assert.deepEqual(
   getToolHeaderSummary({ tool: "open_workspace" }),
   { kind: "empty" },
+);
+
+assert.deepEqual(
+  getToolHeaderSummary({ tool: "list_processes", summary: { processes: 2 } }),
+  { kind: "text", text: "2 processes" },
 );
 
 function pickDisplay(display: ReturnType<typeof getToolDisplay>) {

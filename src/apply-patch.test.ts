@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPatch, isSamePatchFile, parsePatch, replaceFile } from "./apply-patch.js";
+import { applyPatch, isSamePatchFile, parsePatch, patchTargetPaths, replaceFile } from "./apply-patch.js";
 
 const root = await mkdtemp(join(tmpdir(), "devspace-apply-patch-"));
 const replacement = join(root, "replacement.txt");
@@ -21,6 +21,16 @@ assert.equal(await isSamePatchFile("/tmp/Foo.txt", "/tmp/Foo.txt"), true);
 assert.equal(await isSamePatchFile("/tmp/Foo.txt", "/tmp/foo.txt", sameIdentity), true);
 assert.equal(await isSamePatchFile("/tmp/Foo.txt", "/tmp/bar.txt", sameIdentity), false);
 assert.equal(await isSamePatchFile("/tmp/Foo.txt", "/tmp/foo.txt", differentIdentity), false);
+
+assert.deepEqual(
+  patchTargetPaths(`*** Begin Patch
+*** Add File: nested/new.txt
++new
+*** Update File: old.txt
+*** Move to: moved.txt
+*** End Patch`),
+  ["nested/new.txt", "old.txt", "moved.txt"],
+);
 
 await writeFile(join(root, "alpha.txt"), "one\ntwo\nthree\n");
 await writeFile(join(root, "remove.txt"), "remove me\n");

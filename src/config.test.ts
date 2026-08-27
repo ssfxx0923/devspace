@@ -15,13 +15,6 @@ assert.equal(loadConfig(baseEnv).widgets, "changes");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "changes" }).widgets, "changes");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "full" }).widgets, "full");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "off" }).widgets, "off");
-assert.equal(loadConfig(baseEnv).toolMode, "native");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "native" }).toolMode, "native");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "minimal" }).toolMode, "minimal");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "full" }).toolMode, "full");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "codex" }).toolMode, "native");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_MINIMAL_TOOLS: "0" }).toolMode, "full");
-assert.equal(loadConfig({ ...baseEnv, DEVSPACE_MINIMAL_TOOLS: "1" }).toolMode, "minimal");
 assert.equal(loadConfig(baseEnv).skillsEnabled, true);
 assert.equal(loadConfig(baseEnv).devspaceSkillsDir, join(emptyConfigDir, "skills"));
 assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
@@ -64,8 +57,20 @@ assert.throws(
   /Invalid DEVSPACE_WIDGETS: write-only/,
 );
 assert.throws(
-  () => loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "invalid" }),
-  /Invalid DEVSPACE_TOOL_MODE: invalid/,
+  () => loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "native" }),
+  /DEVSPACE_TOOL_MODE is no longer supported.*native tool surface only/,
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_MINIMAL_TOOLS: "1" }),
+  /DEVSPACE_MINIMAL_TOOLS is no longer supported.*native tool surface only/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_TOOL_MODE: "full",
+    DEVSPACE_MINIMAL_TOOLS: "0",
+  }),
+  /DEVSPACE_TOOL_MODE and DEVSPACE_MINIMAL_TOOLS are no longer supported/,
 );
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_FILE_SHARE_BUCKET: "devspace-transfer" }),

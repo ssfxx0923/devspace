@@ -16,6 +16,15 @@ export default defineConfig({
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
+        manualChunks(id) {
+          if (id.includes("/node_modules/@modelcontextprotocol/")) {
+            return "mcp-app-sdk";
+          }
+          if (id.includes("/node_modules/react/") || id.includes("/node_modules/react-dom/")) {
+            return "react-vendor";
+          }
+          return undefined;
+        },
       },
     },
   },

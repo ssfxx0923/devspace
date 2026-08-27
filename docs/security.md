@@ -86,6 +86,11 @@ Filesystem path containment applies to DevSpace file tools. Shell commands run
 as local commands and can do what your user account can do. This is why the MCP
 client must be trusted and the Owner password must stay private.
 
+DevSpace verifies the accepted instruction and activated-skill hashes before a
+new command starts, and applies nested instruction scope to the selected command
+working directory. This is a workflow integrity check, not shell containment:
+DevSpace does not parse a command to discover every path it may reference.
+
 ## Worktrees
 
 Managed worktrees reduce accidental edits to your active checkout, but they are
